@@ -12,3 +12,4 @@ __pycache__
 .idea
 dstc7.egg-info/*
 *.ipynb
+test*

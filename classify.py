@@ -12,7 +12,7 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
 import tokenization
-import bert
+import bert_model
 import optim
 import train
 
@@ -153,7 +153,7 @@ class Classifier(nn.Module):
     """ Classifier with Transformer """
     def __init__(self, cfg, n_labels):
         super().__init__()
-        self.transformer = bert.Transformer(cfg)
+        self.transformer = bert_model.Transformer(cfg)
         self.fc = nn.Linear(cfg.dim, cfg.dim)
         self.activ = nn.Tanh()
         self.drop = nn.Dropout(cfg.p_drop_hidden)
@@ -182,7 +182,7 @@ def main(task='mrpc',
          mode='train'):
 
     cfg = train.Config.from_json(train_cfg)
-    model_cfg = bert.Config.from_json(model_cfg)
+    model_cfg = bert_model.Config.from_json(model_cfg)
 
     set_seeds(cfg.seed)
 
