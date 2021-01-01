@@ -20,7 +20,7 @@ This contains 9 python files.
 - [`optim.py`](./optim.py) : A custom optimizer (BertAdam class) adopted from Hugging Face's code
 - [`train.py`](./train.py) : A helper class for training and evaluation
 - [`utils.py`](./utils.py) : Several utility functions
-- [`pretrain.py`](./pretrain.py) : An example code for pre-training transformer
+- [`pretrain.py`](bert_pretrain.py) : An example code for pre-training transformer
 - [`classify.py`](./classify.py) : An example code for fine-tuning using pre-trained transformer
 
 ## Example Usage

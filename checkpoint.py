@@ -5,8 +5,9 @@
 import numpy as np
 import tensorflow as tf
 import torch
-#import ipdb
-#from models import *
+# import ipdb
+# from models import *
+
 
 def load_param(checkpoint_file, conversion_table):
     """

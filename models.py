@@ -22,7 +22,7 @@ class Config(NamedTuple):
     n_layers: int = 12 # Numher of Hidden Layers
     n_heads: int = 12 # Numher of Heads in Multi-Headed Attention Layers
     dim_ff: int = 768*4 # Dimension of Intermediate Layers in Positionwise Feedforward Net
-    #activ_fn: str = "gelu" # Non-linear Activation Function Type in Hidden Layers
+    # activ_fn: str = "gelu" # Non-linear Activation Function Type in Hidden Layers
     p_drop_hidden: float = 0.1 # Probability of Dropout of various Hidden Layers
     p_drop_attn: float = 0.1 # Probability of Dropout of Attention Layers
     max_len: int = 512 # Maximum Length for Positional Embeddings
@@ -114,7 +114,7 @@ class PositionWiseFeedForward(nn.Module):
         super().__init__()
         self.fc1 = nn.Linear(cfg.dim, cfg.dim_ff)
         self.fc2 = nn.Linear(cfg.dim_ff, cfg.dim)
-        #self.activ = lambda x: activ_fn(cfg.activ_fn, x)
+        # self.activ = lambda x: activ_fn(cfg.activ_fn, x)
 
     def forward(self, x):
         # (B, S, D) -> (B, S, D_ff) -> (B, S, D)
