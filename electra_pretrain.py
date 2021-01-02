@@ -4,20 +4,18 @@
 """ Pretrain transformer with Masked LM and Sentence Classification """
 
 from random import randint, shuffle
-from random import random as rand
 import fire
 
 import torch
 import torch.nn as nn
 from tensorboardX import SummaryWriter
-from transformers import ElectraTokenizer, ElectraForPreTraining
+from transformers import ElectraForPreTraining, ElectraForMaskedLM, ElectraConfig
 
 import tokenization
-import bert_model
 import optim
 import train
 
-from utils import set_seeds, get_device, get_random_word, truncate_tokens_pair
+from utils import set_seeds, get_device, truncate_tokens_pair
 
 # Input file format :
 # 1. One sentence per line. These should ideally be actual sentences,
@@ -67,32 +65,28 @@ class SentPairDataLoader():
     def __iter__(self): # iterator to load data
         while True:
             batch = []
+            instance = None
             for i in range(self.batch_size):
                 # sampling length of each tokens_a and tokens_b
                 # sometimes sample a short sentence to match between train and test sequences
-                len_tokens = randint(1, int(self.max_len / 2)) \
-                    if rand() < self.short_sampling_prob \
-                    else int(self.max_len / 2)
+                # len_tokens = randint(1, int(self.max_len / 2)) \
+                #     if rand() < self.short_sampling_prob \
+                #     else int(self.max_len / 2)
 
-                is_next = rand() < 0.5 # whether token_b is next to token_a or not
+                tokens_a = self.read_tokens(self.f_pos, self.max_len, True)
 
-                tokens_a = self.read_tokens(self.f_pos, len_tokens, True)
-                seek_random_offset(self.f_neg)
-                f_next = self.f_pos if is_next else self.f_neg
-                tokens_b = self.read_tokens(f_next, len_tokens, False)
-
-                if tokens_a is None or tokens_b is None: # end of file
+                if tokens_a is None: # end of file
                     self.f_pos.seek(0, 0) # reset file pointer
                     return
 
-                instance = (is_next, tokens_a, tokens_b)
                 for proc in self.pipeline:
-                    instance = proc(instance)
+                    instance = proc(tokens_a)
 
                 batch.append(instance)
 
             # To Tensor
-            batch_tensors = [torch.tensor(x, dtype=torch.long) for x in zip(*batch)]
+            par_names = ['input_ids', 'attention_mask', 'token_type_ids', 'labels']
+            batch_tensors = dict(zip(par_names, [torch.tensor(x, dtype=torch.long) for x in zip(*batch)]))
             yield batch_tensors
 
 
@@ -115,83 +109,39 @@ class Preprocess4Pretrain(Pipeline):
         self.indexer = indexer # function from token to token index
         self.max_len = max_len
 
-    def __call__(self, instance):
-        is_next, tokens_a, tokens_b = instance
-
+    def __call__(self, tokens_a):
         # -3  for special tokens [CLS], [SEP], [SEP]
-        truncate_tokens_pair(tokens_a, tokens_b, self.max_len - 3)
+        truncate_tokens_pair(tokens_a, [], self.max_len - 2)
 
         # Add Special Tokens
-        tokens = ['[CLS]'] + tokens_a + ['[SEP]'] + tokens_b + ['[SEP]']
-        segment_ids = [0]*(len(tokens_a)+2) + [1]*(len(tokens_b)+1)
-        input_mask = [1]*len(tokens)
+        tokens = ['[CLS]'] + tokens_a + ['[SEP]']
+        token_type_ids = [0] * self.max_len
+        attention_mask = [1] * len(tokens)
+
+        # Get original input ids as ElectraGenerator labels
+        origin_ids = [-100] * self.max_len
 
         # For masked Language Models
-        masked_tokens, masked_pos = [], []
         # the number of prediction is sometimes less than max_pred when sequence is short
-        n_pred = min(self.max_pred, max(1, int(round(len(tokens)*self.mask_prob))))
+        n_pred = min(self.max_pred, max(1, int(round(len(tokens) * self.mask_prob))))
         # candidate positions of masked tokens
         cand_pos = [i for i, token in enumerate(tokens)
                     if token != '[CLS]' and token != '[SEP]']
         shuffle(cand_pos)
         for pos in cand_pos[:n_pred]:
-            masked_tokens.append(tokens[pos])
-            masked_pos.append(pos)
-            if rand() < 0.8: # 80%
-                tokens[pos] = '[MASK]'
-            elif rand() < 0.5: # 10%
-                tokens[pos] = get_random_word(self.vocab_words)
-        # when n_pred < max_pred, we only calculate loss within n_pred
-        masked_weights = [1]*len(masked_tokens)
+            attention_mask[pos] = 0
+            origin_ids[pos] = self.indexer(tokens[pos])[0]  # get the only element
+            tokens[pos] = '[MASK]'
 
         # Token Indexing
         input_ids = self.indexer(tokens)
-        masked_ids = self.indexer(masked_tokens)
 
         # Zero Padding
         n_pad = self.max_len - len(input_ids)
-        input_ids.extend([0]*n_pad)
-        segment_ids.extend([0]*n_pad)
-        input_mask.extend([0]*n_pad)
+        input_ids.extend([0] * n_pad)
+        attention_mask.extend([0] * n_pad)
 
-        # Zero Padding for masked target
-        if self.max_pred > n_pred:
-            n_pad = self.max_pred - n_pred
-            masked_ids.extend([0]*n_pad)
-            masked_pos.extend([0]*n_pad)
-            masked_weights.extend([0]*n_pad)
-
-        return (input_ids, segment_ids, input_mask, masked_ids, masked_pos, masked_weights, is_next)
-
-
-class ElectraGenerator4Pretrain(nn.Module):
-    "Bert Model for Pretrain : Masked LM and next sentence classification"
-    def __init__(self, cfg):
-        super().__init__()
-        self.transformer = bert_model.Transformer(cfg)
-        self.fc = nn.Linear(cfg.dim, cfg.dim)
-        self.activ1 = nn.Tanh()
-        self.linear = nn.Linear(cfg.dim, cfg.dim)
-        self.activ2 = bert_model.gelu
-        self.norm = bert_model.LayerNorm(cfg)
-        self.classifier = nn.Linear(cfg.dim, 2)
-        # decoder is shared with embedding layer
-        embed_weight = self.transformer.embed.tok_embed.weight
-        n_vocab, n_dim = embed_weight.size()
-        self.decoder = nn.Linear(n_dim, n_vocab, bias=False)
-        self.decoder.weight = embed_weight
-        self.decoder_bias = nn.Parameter(torch.zeros(n_vocab))
-
-    def forward(self, input_ids, segment_ids, input_mask, masked_pos):
-        h = self.transformer(input_ids, segment_ids, input_mask)
-        pooled_h = self.activ1(self.fc(h[:, 0]))
-        masked_pos = masked_pos[:, :, None].expand(-1, -1, h.size(-1))
-        h_masked = torch.gather(h, 1, masked_pos)
-        h_masked = self.norm(self.activ2(self.linear(h_masked)))
-        logits_lm = self.decoder(h_masked) + self.decoder_bias
-        logits_clsf = self.classifier(pooled_h)
-
-        return logits_lm, logits_clsf
+        return (input_ids, attention_mask, token_type_ids, origin_ids)
 
 
 def main(train_cfg='config/electra_pretrain.json',
@@ -202,14 +152,14 @@ def main(train_cfg='config/electra_pretrain.json',
          vocab='../uncased_L-12_H-768_A-12/vocab.txt',
          save_dir='../exp/electra/pretrain',
          log_dir='../exp/electra/pretrain/runs',
-         max_len=512,
+         max_len=128,
          max_pred=20,
          mask_prob=0.15):
 
-    cfg = train.Config.from_json(train_cfg)
-    model_cfg = bert_model.Config.from_json(model_cfg)
+    train_cfg = train.Config.from_json(train_cfg)
+    # model_cfg = ElectraConfig()
 
-    set_seeds(cfg.seed)
+    set_seeds(train_cfg.seed)
 
     tokenizer = tokenization.FullTokenizer(vocab_file=vocab, do_lower_case=True)
     tokenize = lambda x: tokenizer.tokenize(tokenizer.convert_to_unicode(x))
@@ -219,20 +169,22 @@ def main(train_cfg='config/electra_pretrain.json',
                                     list(tokenizer.vocab.keys()),
                                     tokenizer.convert_tokens_to_ids,
                                     max_len)]
+
     data_iter = SentPairDataLoader(data_file,
-                                   cfg.batch_size,
+                                   train_cfg.batch_size,
                                    tokenize,
                                    max_len,
                                    pipeline=pipeline)
 
-    model = ElectraForPreTraining.from_pretrained('google/electra-small-generator')
+    criterion1 = nn.CrossEntropyLoss(reduction='none')
+    criterion2 = nn.CrossEntropyLoss()
 
+    generator = ElectraForMaskedLM.from_pretrained('google/electra-small-generator')
+    t_discriminator = ElectraForPreTraining.from_pretrained('google/electra-base-discriminator')
+    s_discriminator = ElectraForPreTraining.from_pretrained('google/electra-small-discriminator')
 
-    # criterion1 = nn.CrossEntropyLoss(reduction='none')
-    # criterion2 = nn.CrossEntropyLoss()
-    #
-    # optimizer = optim.optim4GPU(cfg, model)
-    # trainer = train.Trainer(cfg, model, data_iter, optimizer, save_dir, get_device())
+    # optimizer = optim.optim4GPU(train_cfg, [generator, s_discriminator])
+    # trainer = train.Trainer(train_cfg, model, data_iter, optimizer, save_dir, get_device())
     #
     # writer = SummaryWriter(log_dir=log_dir) # for tensorboardX
     #
@@ -257,3 +209,28 @@ def main(train_cfg='config/electra_pretrain.json',
 
 if __name__ == '__main__':
     fire.Fire(main)
+
+
+# ------------------------------
+# TODO
+# 1. 改寫 Trainer.train
+# 2. 改寫 get_loss
+# 3. 增加 distillation、加入 teacher discriminator
+# ------------------------------
+
+# for batch in data_iter:
+#
+#     generator = ElectraForMaskedLM.from_pretrained('google/electra-small-generator')
+#     s_discriminator = ElectraForPreTraining.from_pretrained('google/electra-small-discriminator')
+#     t_discriminator = ElectraForPreTraining.from_pretrained('google/electra-base-discriminator')
+#
+#     g_outputs = generator(**batch, output_attentions=True, output_hidden_states=True)
+#     g_outputs_ids = torch.argmax(g_outputs.logits, axis=2)
+#
+#     d_labels = (batch['labels'] != g_outputs_ids)
+#     s_d_outputs = s_discriminator(g_outputs_ids, labels=d_labels)
+#     t_d_outputs = t_discriminator(g_outputs_ids, labels=d_labels)
+#
+#     print(s_d_outputs.loss, t_d_outputs.loss)
+#
+#     break

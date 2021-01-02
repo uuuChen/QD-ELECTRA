@@ -8,26 +8,31 @@ import torch
 from torch.optim import Optimizer
 from torch.nn.utils import clip_grad_norm_
 
+
 def warmup_cosine(x, warmup=0.002):
     if x < warmup:
         return x/warmup
     return 0.5 * (1.0 + torch.cos(math.pi * x))
+
 
 def warmup_constant(x, warmup=0.002):
     if x < warmup:
         return x/warmup
     return 1.0
 
+
 def warmup_linear(x, warmup=0.002):
     if x < warmup:
         return x/warmup
     return 1.0 - x
+
 
 SCHEDULES = {
     'warmup_cosine':warmup_cosine,
     'warmup_constant':warmup_constant,
     'warmup_linear':warmup_linear,
 }
+
 
 class BertAdam(Optimizer):
     """Implements BERT version of Adam algorithm with weight decay fix.
@@ -145,10 +150,14 @@ class BertAdam(Optimizer):
         return loss
 
 
-
-def optim4GPU(cfg, model):
+def optim4GPU(cfg, models):
     """ optimizer for GPU training """
-    param_optimizer = list(model.named_parameters())
+    if isinstance(models, list):  # More than one models
+        param_optimizer = list()
+        for model in models:
+            param_optimizer += list(model.named_parameters())
+    else:  # Only one model
+        param_optimizer = list(models.named_parameters())
     no_decay = ['bias', 'gamma', 'beta']
     optimizer_grouped_parameters = [
         {'params': [p for n, p in param_optimizer if n not in no_decay], 'weight_decay_rate': 0.01},
@@ -157,3 +166,6 @@ def optim4GPU(cfg, model):
                     lr=cfg.lr,
                     warmup=cfg.warmup,
                     t_total=cfg.total_steps)
+
+
+
