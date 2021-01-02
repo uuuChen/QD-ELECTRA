@@ -205,10 +205,10 @@ def main(train_cfg='config/bert_pretrain.json',
          max_pred=20,
          mask_prob=0.15):
 
-    cfg = train.Config.from_json(train_cfg)
+    train_cfg = train.Config.from_json(train_cfg)
     model_cfg = bert_model.Config.from_json(model_cfg)
 
-    set_seeds(cfg.seed)
+    set_seeds(train_cfg.seed)
 
     tokenizer = tokenization.FullTokenizer(vocab_file=vocab, do_lower_case=True)
     tokenize = lambda x: tokenizer.tokenize(tokenizer.convert_to_unicode(x))
@@ -219,7 +219,7 @@ def main(train_cfg='config/bert_pretrain.json',
                                     tokenizer.convert_tokens_to_ids,
                                     max_len)]
     data_iter = SentPairDataLoader(data_file,
-                                   cfg.batch_size,
+                                   train_cfg.batch_size,
                                    tokenize,
                                    max_len,
                                    pipeline=pipeline)
@@ -228,12 +228,12 @@ def main(train_cfg='config/bert_pretrain.json',
     criterion1 = nn.CrossEntropyLoss(reduction='none')
     criterion2 = nn.CrossEntropyLoss()
 
-    optimizer = optim.optim4GPU(cfg, model)
-    trainer = train.Trainer(cfg, model, data_iter, optimizer, save_dir, get_device())
+    optimizer = optim.optim4GPU(train_cfg, model)
+    trainer = train.Trainer(train_cfg, model_cfg, model, data_iter, optimizer, save_dir, get_device())
 
     writer = SummaryWriter(log_dir=log_dir) # for tensorboardX
 
-    def get_loss(model, batch, global_step): # make sure loss is tensor
+    def get_loss(model, batch, global_step, train_cfg, model_cfg): # make sure loss is tensor
         input_ids, segment_ids, input_mask, masked_ids, masked_pos, masked_weights, is_next = batch
 
         logits_lm, logits_clsf = model(input_ids, segment_ids, input_mask, masked_pos)

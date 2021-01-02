@@ -20,10 +20,8 @@ class Config(NamedTuple):
     n_layers: int = 12 # Numher of Hidden Layers
     t_n_heads: int = 12 # Numher of Teacher Heads in Multi-Headed Attention Layers
     s_n_heads: int = 4 # Numher of Student Heads in Multi-Headed Attention Layers
-    t_dim_ff: int = 3072 # Dimension of Intermediate Layers in Teacher Positionwise Feedforward Net
-    s_dim_ff: int = 1024 # Dimension of Intermediate Layers in Student Positionwise Feedforward Net
-    t_emb_size: int = 768 # Dimension of Embedding Layer of Teacher Model
-    s_emb_size: int = 256 # Dimension of Embedding Layer of Student Model
+    t_hidden_size: int = 768 # Dimension of Feed-Forward Hidden Layer of Teacher Model
+    s_hidden_size: int = 256 # Dimension of Feed-Forward Hidden Layer of Student Model
     # activ_fn: str = "gelu" # Non-linear Activation Function Type in Hidden Layers
     p_drop_hidden: float = 0.1 # Probability of Dropout of various Hidden Layers
     p_drop_attn: float = 0.1 # Probability of Dropout of Attention Layers
@@ -39,22 +37,17 @@ class DistillELECTRA(nn.Module):
     def __init__(self,
                  generator,
                  t_discriminator,
-                 t_emb_size,
-                 t_hidden_size,
                  s_discriminator,
-                 s_emb_size,
+                 t_hidden_size,
                  s_hidden_size):
 
         super().__init__()
         self.generator = generator
         self.t_discriminator = t_discriminator
         self.t_hidden_size = t_hidden_size
-        self.t_emb_size = t_emb_size
         self.s_discriminator = s_discriminator
         self.s_hidden_size = s_hidden_size
-        self.s_emb_size = s_emb_size
 
-        self.fit_emb_dense = nn.Linear(self.s_emb_size, self.t_emb_size)
         self.fit_hidden_dense = nn.Linear(self.s_hidden_size, self.t_hidden_size)
 
     def forward(self, input_ids, attention_mask, token_type_ids, labels):
@@ -79,12 +72,12 @@ class DistillELECTRA(nn.Module):
                                            output_attentions=True,
                                            output_hidden_states=True)
 
-        # Map student hidden states to teacher hidden states
+        # Map student hidden states to teacher hidden states and return
+        s_d_hiddens = list()
         for i, hidden_state in enumerate(s_d_outputs.hidden_states):
-            fit_dense = self.fit_emb_dense if i == 0 else self.fit_hidden_dense
-            s_d_outputs.hidden_states[i] = fit_dense(hidden_state)
+            s_d_hiddens.append(self.fit_hidden_dense(hidden_state))
 
-        return g_outputs, t_d_outputs, s_d_outputs,
+        return g_outputs, t_d_outputs, s_d_outputs, s_d_hiddens
 
 
 class QuantizedDistillELECTRA(nn.Module):

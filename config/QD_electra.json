@@ -1,9 +1,7 @@
 {
 	"dim": 256,
-	"t_dim_ff": 3072,
-	"s_dim_ff": 1024,
-	"t_emb_size": 768,
-	"s_emb_size": 256,
+	"t_hidden_size": 768,
+	"s_hidden_size": 256,
 	"n_layers": 12,
 	"p_drop_attn": 0.1,
 	"t_n_heads": 12,

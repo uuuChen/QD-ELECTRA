@@ -33,8 +33,9 @@ class Config(NamedTuple):
 
 class Trainer(object):
     """Training Helper Class"""
-    def __init__(self, cfg, model, data_iter, optimizer, save_dir, device):
-        self.cfg = cfg # config for training : see class Config
+    def __init__(self, train_cfg, model_cfg, model, data_iter, optimizer, save_dir, device):
+        self.train_cfg = train_cfg # config for training : see class Config
+        self.model_cfg = model_cfg # config for model
         self.model = model
         self.data_iter = data_iter # iterator to load data
         self.optimizer = optimizer
@@ -50,14 +51,15 @@ class Trainer(object):
             model = nn.DataParallel(model)
 
         global_step = 0 # global iteration steps regardless of epochs
-        for e in range(self.cfg.n_epochs):
+        for e in range(self.train_cfg.n_epochs):
             loss_sum = 0. # the sum of iteration losses to get average loss in every epoch
             iter_bar = tqdm(self.data_iter, desc='Iter (loss=X.XXX)')
             for i, batch in enumerate(iter_bar):
                 batch = [t.to(self.device) for t in batch]
 
                 self.optimizer.zero_grad()
-                loss = get_loss(model, batch, global_step, self.cfg).mean() # mean() for Data Parallelism
+                loss = get_loss(model, batch, global_step, self.train_cfg, self.model_cfg).mean() # mean() for Data
+                # Parallelism
                 loss.backward()
                 self.optimizer.step()
 
@@ -65,16 +67,16 @@ class Trainer(object):
                 loss_sum += loss.item()
                 iter_bar.set_description('Iter (loss=%5.3f)'%loss.item())
 
-                if global_step % self.cfg.save_steps == 0: # save
+                if global_step % self.train_cfg.save_steps == 0: # save
                     self.save(global_step)
 
-                if self.cfg.total_steps and self.cfg.total_steps < global_step:
-                    print('Epoch %d/%d : Average Loss %5.3f'%(e+1, self.cfg.n_epochs, loss_sum/(i+1)))
+                if self.train_cfg.total_steps and self.train_cfg.total_steps < global_step:
+                    print('Epoch %d/%d : Average Loss %5.3f'%(e+1, self.train_cfg.n_epochs, loss_sum/(i+1)))
                     print('The Total Steps have been reached.')
                     self.save(global_step) # save and finish when global_steps reach total_steps
                     return
 
-            print('Epoch %d/%d : Average Loss %5.3f'%(e+1, self.cfg.n_epochs, loss_sum/(i+1)))
+            print('Epoch %d/%d : Average Loss %5.3f'%(e+1, self.train_cfg.n_epochs, loss_sum/(i+1)))
         self.save(global_step)
 
     def eval(self, evaluate, model_file, data_parallel=True):
