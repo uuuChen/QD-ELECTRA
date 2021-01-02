@@ -12,6 +12,7 @@ from tensorboardX import SummaryWriter
 from transformers import ElectraForPreTraining, ElectraForMaskedLM
 from QD_electra_model import DistillELECTRA, QuantizedDistillELECTRA
 import QD_electra_model
+import torch.nn.functional as F
 
 import tokenization
 import optim
@@ -27,21 +28,11 @@ from utils import set_seeds, get_device, truncate_tokens_pair
 #    so that the "next sentence prediction" task doesn't span between documents.
 
 
-def seek_random_offset(f, back_margin=2000):
-    """ seek random offset of file pointer """
-    f.seek(0, 2)
-    # we remain some amount of text to read
-    max_offset = f.tell() - back_margin
-    f.seek(randint(0, max_offset), 0)
-    f.readline() # throw away an incomplete sentence
-
-
 class SentPairDataLoader():
     """ Load sentence pair (sequential or random order) from corpus """
     def __init__(self, file, batch_size, tokenize, max_len, short_sampling_prob=0.1, pipeline=[]):
         super().__init__()
-        self.f_pos = open(file, "r", encoding='utf-8', errors='ignore') # for a positive sample
-        self.f_neg = open(file, "r", encoding='utf-8', errors='ignore') # for a negative (random) sample
+        self.file = open(file, "r", encoding='utf-8', errors='ignore')
         self.tokenize = tokenize # tokenize function
         self.max_len = max_len # maximum length of tokens
         self.short_sampling_prob = short_sampling_prob
@@ -75,10 +66,10 @@ class SentPairDataLoader():
                 #     if rand() < self.short_sampling_prob \
                 #     else int(self.max_len / 2)
 
-                tokens_a = self.read_tokens(self.f_pos, self.max_len, True)
+                tokens_a = self.read_tokens(self.file, self.max_len, True)
 
                 if tokens_a is None: # end of file
-                    self.f_pos.seek(0, 0) # reset file pointer
+                    self.file.seek(0, 0) # reset file pointer
                     return
 
                 for proc in self.pipeline:
@@ -119,8 +110,11 @@ class Preprocess4Pretrain(Pipeline):
         token_type_ids = [0] * self.max_len
         attention_mask = [1] * len(tokens)
 
-        # Get original input ids as ElectraGenerator labels
-        labels = [-100] * self.max_len
+        # Get ElectraGenerator label. "-100" means the corresponding token is unmasked, else means the masked token ids
+        label = [-100] * self.max_len
+
+        # Get original input ids as ElectraDiscriminator labels
+        original_input_ids = self.indexer(tokens)
 
         # For masked Language Models
         # the number of prediction is sometimes less than max_pred when sequence is short
@@ -131,7 +125,7 @@ class Preprocess4Pretrain(Pipeline):
         shuffle(cand_pos)
         for pos in cand_pos[:n_pred]:
             attention_mask[pos] = 0
-            labels[pos] = self.indexer(tokens[pos])[0]  # get the only element
+            label[pos] = self.indexer(tokens[pos])[0]  # get the only one element from list
             tokens[pos] = '[MASK]'
 
         # Token Indexing
@@ -142,7 +136,7 @@ class Preprocess4Pretrain(Pipeline):
         input_ids.extend([0] * n_pad)
         attention_mask.extend([0] * n_pad)
 
-        return (input_ids, attention_mask, token_type_ids, labels)
+        return input_ids, attention_mask, token_type_ids, label, original_input_ids
 
 
 def main(train_cfg='config/electra_pretrain.json',
@@ -193,12 +187,21 @@ def main(train_cfg='config/electra_pretrain.json',
     writer = SummaryWriter(log_dir=log_dir) # for tensorboardX
 
     bceWithLogitsLoss = nn.BCEWithLogitsLoss()
+    bceLoss = nn.BCELoss()
+    nllLoss = nn.NLLLoss()
     mseLoss = nn.MSELoss()
+    # crossEntropyLoss = nn.cross
 
     def get_distillElectra_loss(model, batch, global_step, train_cfg, model_cfg): # make sure loss is tensor
-        input_ids, attention_mask, token_type_ids, labels = batch
+        input_ids, attention_mask, token_type_ids, labels, original_input_ids = batch
 
-        g_outputs, t_d_outputs, s_d_outputs, s_d_hiddens = model(input_ids, attention_mask, token_type_ids, labels)
+        g_outputs, t_d_outputs, s_d_outputs, s2t_hiddens = model(
+            input_ids,
+            attention_mask,
+            token_type_ids,
+            labels,
+            original_input_ids
+        )
 
         # Get original electra loss
         electra_loss = g_outputs.loss + s_d_outputs.loss
@@ -212,13 +215,19 @@ def main(train_cfg='config/electra_pretrain.json',
         #       3-1. Teacher layer numbers equal to student layer numbers
         #       3-2. Teacher head numbers are divisible by Student head numbers
         # -----------------------
-        soft_logits_loss = bceWithLogitsLoss(t_d_outputs.logits / train_cfg.temperature,
-                                             s_d_outputs.logits / train_cfg.temperature)
+        soft_logits_loss = bceLoss(
+            F.sigmoid(s_d_outputs.logits / train_cfg.temperature),
+            F.sigmoid(t_d_outputs.logits.detach() / train_cfg.temperature),
+        ) * train_cfg.temperature * train_cfg.temperature
 
         hidden_layers_loss = 0
-        for t_hidden, s_hidden in zip(t_d_outputs.hidden_states, s_d_hiddens):
+        for t_hidden, s_hidden in zip(t_d_outputs.hidden_states, s2t_hiddens):
             hidden_layers_loss += mseLoss(t_hidden, s_hidden)
 
+        # -----------------------
+        # teacher attention shape: (batch_size, t_n_heads, max_seq_len, max_seq_len)
+        # student attention shape: (batch_size, s_n_heads, max_seq_len, max_seq_len)
+        # -----------------------
         attention_loss = 0
         for t_atten, s_atten in zip(t_d_outputs.attentions, s_d_outputs.attentions):
             split_sections = [model_cfg.s_n_heads] * (model_cfg.t_n_heads // model_cfg.s_n_heads)
@@ -236,6 +245,12 @@ def main(train_cfg='config/electra_pretrain.json',
                             'total_loss': total_loss.item(),
                             'lr': optimizer.get_lr()[0]},
                            global_step)
+
+        print(f'\tElectra Loss {electra_loss.item():.3f}\t'
+              f'Soft Logits Loss {soft_logits_loss.item():.3f}\t'
+              f'Hidden Loss {hidden_layers_loss.item():.3f}\t'
+              f'Attention Loss {attention_loss.item():.3f}\t'
+              f'Total Loss {total_loss.item():.3f}\t')
 
         return total_loss
 

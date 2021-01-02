@@ -1,10 +1,10 @@
 {
-    "seed": 3431,
-    "batch_size": 1,
-    "lr": 1e-4,
-    "n_epochs": 25,
+    "seed": 3333,
+    "batch_size": 10,
+    "lr": 5e-4,
+    "n_epochs": 100,
     "warmup": 0.1,
     "save_steps": 10000,
     "temperature": 1,
-    "total_steps": 1
+    "total_steps": 1000000
 }

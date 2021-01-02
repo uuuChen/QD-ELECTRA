@@ -44,25 +44,25 @@ class DistillELECTRA(nn.Module):
         super().__init__()
         self.generator = generator
         self.t_discriminator = t_discriminator
-        self.t_hidden_size = t_hidden_size
         self.s_discriminator = s_discriminator
+        self.t_hidden_size = t_hidden_size
         self.s_hidden_size = s_hidden_size
 
         self.fit_hidden_dense = nn.Linear(self.s_hidden_size, self.t_hidden_size)
 
-    def forward(self, input_ids, attention_mask, token_type_ids, labels):
+    def forward(self, masked_input_ids, attention_mask, token_type_ids, labels, original_input_ids):
         # Generator
-        g_outputs = self.generator(input_ids=input_ids,
+        g_outputs = self.generator(input_ids=masked_input_ids,
                                    attention_mask=attention_mask,
                                    token_type_ids=token_type_ids,
                                    labels=labels,
                                    output_attentions=True,
                                    output_hidden_states=True)
         g_outputs_ids = torch.argmax(g_outputs.logits, axis=2)  # g_outputs.logits shape: (batch_size, max_seq_len,
-        # dimension)
+        # vocab_size)
 
         # Discriminator
-        d_labels = (labels != g_outputs_ids)
+        d_labels = (original_input_ids != g_outputs_ids)
         t_d_outputs = self.t_discriminator(g_outputs_ids,
                                            labels=d_labels,
                                            output_attentions=True,
@@ -73,11 +73,11 @@ class DistillELECTRA(nn.Module):
                                            output_hidden_states=True)
 
         # Map student hidden states to teacher hidden states and return
-        s_d_hiddens = list()
+        s2t_hiddens = list()
         for i, hidden_state in enumerate(s_d_outputs.hidden_states):
-            s_d_hiddens.append(self.fit_hidden_dense(hidden_state))
+            s2t_hiddens.append(self.fit_hidden_dense(hidden_state))
 
-        return g_outputs, t_d_outputs, s_d_outputs, s_d_hiddens
+        return g_outputs, t_d_outputs, s_d_outputs, s2t_hiddens
 
 
 class QuantizedDistillELECTRA(nn.Module):
