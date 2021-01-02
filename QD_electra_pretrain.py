@@ -10,6 +10,8 @@ import torch
 import torch.nn as nn
 from tensorboardX import SummaryWriter
 from transformers import ElectraForPreTraining, ElectraForMaskedLM, ElectraConfig
+from QD_electra_model import DistillELECTRA, QuantizedDistillELECTRA
+import QD_electra_model
 
 import tokenization
 import optim
@@ -85,8 +87,9 @@ class SentPairDataLoader():
                 batch.append(instance)
 
             # To Tensor
-            par_names = ['input_ids', 'attention_mask', 'token_type_ids', 'labels']
-            batch_tensors = dict(zip(par_names, [torch.tensor(x, dtype=torch.long) for x in zip(*batch)]))
+            # par_names = ['input_ids', 'attention_mask', 'token_type_ids', 'labels']
+            # batch_tensors = dict(zip(par_names, [torch.tensor(x, dtype=torch.long) for x in zip(*batch)]))
+            batch_tensors = [torch.tensor(x, dtype=torch.long) for x in zip(*batch)]
             yield batch_tensors
 
 
@@ -119,7 +122,7 @@ class Preprocess4Pretrain(Pipeline):
         attention_mask = [1] * len(tokens)
 
         # Get original input ids as ElectraGenerator labels
-        origin_ids = [-100] * self.max_len
+        labels = [-100] * self.max_len
 
         # For masked Language Models
         # the number of prediction is sometimes less than max_pred when sequence is short
@@ -130,7 +133,7 @@ class Preprocess4Pretrain(Pipeline):
         shuffle(cand_pos)
         for pos in cand_pos[:n_pred]:
             attention_mask[pos] = 0
-            origin_ids[pos] = self.indexer(tokens[pos])[0]  # get the only element
+            labels[pos] = self.indexer(tokens[pos])[0]  # get the only element
             tokens[pos] = '[MASK]'
 
         # Token Indexing
@@ -141,7 +144,12 @@ class Preprocess4Pretrain(Pipeline):
         input_ids.extend([0] * n_pad)
         attention_mask.extend([0] * n_pad)
 
-        return (input_ids, attention_mask, token_type_ids, origin_ids)
+        print(input_ids)
+        print(attention_mask)
+        print(token_type_ids)
+        print(labels)
+
+        return (input_ids, attention_mask, token_type_ids, labels)
 
 
 def main(train_cfg='config/electra_pretrain.json',
@@ -157,7 +165,7 @@ def main(train_cfg='config/electra_pretrain.json',
          mask_prob=0.15):
 
     train_cfg = train.Config.from_json(train_cfg)
-    # model_cfg = ElectraConfig()
+    model_cfg = QD_electra_model.Config.from_json(model_cfg)
 
     set_seeds(train_cfg.seed)
 
@@ -176,35 +184,57 @@ def main(train_cfg='config/electra_pretrain.json',
                                    max_len,
                                    pipeline=pipeline)
 
-    criterion1 = nn.CrossEntropyLoss(reduction='none')
-    criterion2 = nn.CrossEntropyLoss()
-
+    # Get distilled-electra and quantized-distilled-electra
     generator = ElectraForMaskedLM.from_pretrained('google/electra-small-generator')
     t_discriminator = ElectraForPreTraining.from_pretrained('google/electra-base-discriminator')
     s_discriminator = ElectraForPreTraining.from_pretrained('google/electra-small-discriminator')
+    distillElectra = DistillELECTRA(generator,
+                                    t_discriminator,
+                                    model_cfg.t_emb_size,
+                                    model_cfg.t_dim_ff,
+                                    s_discriminator,
+                                    model_cfg.s_dim_ff,
+                                    model_cfg.s_emb_size)
 
-    # optimizer = optim.optim4GPU(train_cfg, [generator, s_discriminator])
-    # trainer = train.Trainer(train_cfg, model, data_iter, optimizer, save_dir, get_device())
-    #
-    # writer = SummaryWriter(log_dir=log_dir) # for tensorboardX
-    #
-    # def get_loss(model, batch, global_step): # make sure loss is tensor
-    #     input_ids, segment_ids, input_mask, masked_ids, masked_pos, masked_weights, is_next = batch
-    #
-    #     logits_lm, logits_clsf = model(input_ids, segment_ids, input_mask, masked_pos)
-    #     loss_lm = criterion1(logits_lm.transpose(1, 2), masked_ids) # for masked LM
-    #     loss_lm = (loss_lm*masked_weights.float()).mean()
-    #     loss_clsf = criterion2(logits_clsf, is_next) # for sentence classification
-    #     writer.add_scalars('data/scalar_group',
-    #                        {'loss_lm': loss_lm.item(),
-    #                         'loss_clsf': loss_clsf.item(),
-    #                         'loss_total': (loss_lm + loss_clsf).item(),
-    #                         'lr': optimizer.get_lr()[0],
-    #                        },
-    #                        global_step)
-    #     return loss_lm + loss_clsf
-    #
-    # trainer.train(get_loss, model_file, None, data_parallel)
+    optimizer = optim.optim4GPU(train_cfg, distillElectra)
+    trainer = train.Trainer(train_cfg, distillElectra, data_iter, optimizer, save_dir, get_device())
+
+    writer = SummaryWriter(log_dir=log_dir) # for tensorboardX
+
+    crossEntropyLoss = nn.CrossEntropyLoss()
+    mseLoss = nn.MSELoss()
+
+    def get_distillElectra_loss(model, batch, global_step, train_cfg): # make sure loss is tensor
+        input_ids, attention_mask, token_type_ids, labels = batch
+
+        g_outputs, t_d_outputs, s_d_outputs = model(input_ids, attention_mask, token_type_ids, labels)
+
+        # Get original electra loss
+        electra_loss = g_outputs.loss + s_d_outputs.loss
+
+        # Get distillation loss
+        # 1. teacher and student logits (cross-entropy + temperature)
+        # 2. embedding layer loss + hidden losses (MSE)
+        # 3. attention matrices loss (MSE)
+        soft_logits_loss = crossEntropyLoss(t_d_outputs.logits / train_cfg.temperature,
+                                            s_d_outputs.logits / train_cfg.temperature)
+
+        hidden_layers_loss = 0
+        for t_hidden, s_hidden in zip(t_d_outputs.hidden_states, s_d_outputs.hidden_states):
+            hidden_layers_loss += mseLoss(t_hidden, s_hidden)
+
+        # attention_loss =
+
+        # writer.add_scalars('data/scalar_group',
+        #                    {'loss_lm': loss_lm.item(),
+        #                     'loss_clsf': loss_clsf.item(),
+        #                     'loss_total': (loss_lm + loss_clsf).item(),
+        #                     'lr': optimizer.get_lr()[0],
+        #                    },
+        #                    global_step)
+        return electra_loss + soft_logits_loss + hidden_layers_loss
+
+    trainer.train(get_distillElectra_loss, model_file, None, data_parallel)
 
 
 if __name__ == '__main__':
@@ -215,9 +245,9 @@ if __name__ == '__main__':
 # TODO
 # 1. 改寫 Trainer.train
 # 2. 改寫 get_loss
-# 3. 增加 distillation、加入 teacher discriminator
+# 3. 增加 distillation
 # ------------------------------
-
+#
 # for batch in data_iter:
 #
 #     generator = ElectraForMaskedLM.from_pretrained('google/electra-small-generator')

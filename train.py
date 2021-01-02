@@ -24,6 +24,7 @@ class Config(NamedTuple):
     warmup: float = 0.1
     save_steps: int = 100 # interval for saving model
     total_steps: int = 100000 # total number of steps to train
+    temperature: int = 1  # temperature for distillation
 
     @classmethod
     def from_json(cls, file): # load config from json file
@@ -56,7 +57,7 @@ class Trainer(object):
                 batch = [t.to(self.device) for t in batch]
 
                 self.optimizer.zero_grad()
-                loss = get_loss(model, batch, global_step).mean() # mean() for Data Parallelism
+                loss = get_loss(model, batch, global_step, self.cfg).mean() # mean() for Data Parallelism
                 loss.backward()
                 self.optimizer.step()
 

@@ -1,7 +1,7 @@
 .vscode
 settings.json
-saved/
-logs/
+saved*/
+logs*/
 .DS_Store
 .ipynb_checkpoints
 *checkpoint.ipynb
