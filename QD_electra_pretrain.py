@@ -204,6 +204,7 @@ def main(train_cfg='config/electra_pretrain.json',
         )
 
         # Get original electra loss
+        s_d_outputs.loss *= train_cfg.lambda_
         electra_loss = g_outputs.loss + s_d_outputs.loss
 
         # -----------------------
@@ -222,7 +223,7 @@ def main(train_cfg='config/electra_pretrain.json',
 
         hidden_layers_loss = 0
         for t_hidden, s_hidden in zip(t_d_outputs.hidden_states, s2t_hidden_states):
-            hidden_layers_loss += mseLoss(t_hidden, s_hidden) * 0.1
+            hidden_layers_loss += mseLoss(t_hidden, s_hidden)
 
         # -----------------------
         # teacher attention shape: (batch_size, t_n_heads, max_seq_len, max_seq_len)

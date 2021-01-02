@@ -25,6 +25,7 @@ class Config(NamedTuple):
     save_steps: int = 100 # interval for saving model
     total_steps: int = 100000 # total number of steps to train
     temperature: int = 1  # temperature for distillation
+    lambda_: int = 50
 
     @classmethod
     def from_json(cls, file): # load config from json file

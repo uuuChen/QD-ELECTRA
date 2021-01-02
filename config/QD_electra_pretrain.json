@@ -6,5 +6,6 @@
     "warmup": 0.1,
     "save_steps": 10000,
     "temperature": 1,
-    "total_steps": 1000000
+    "total_steps": 1000000,
+    "lambda_": 50
 }
