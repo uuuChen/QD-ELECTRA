@@ -195,7 +195,7 @@ def main(train_cfg='config/electra_pretrain.json',
     def get_distillElectra_loss(model, batch, global_step, train_cfg, model_cfg): # make sure loss is tensor
         input_ids, attention_mask, token_type_ids, labels, original_input_ids = batch
 
-        g_outputs, t_d_outputs, s_d_outputs, s2t_hiddens = model(
+        g_outputs, t_d_outputs, s_d_outputs, s2t_hidden_states = model(
             input_ids,
             attention_mask,
             token_type_ids,
@@ -221,16 +221,16 @@ def main(train_cfg='config/electra_pretrain.json',
         ) * train_cfg.temperature * train_cfg.temperature
 
         hidden_layers_loss = 0
-        for t_hidden, s_hidden in zip(t_d_outputs.hidden_states, s2t_hiddens):
-            hidden_layers_loss += mseLoss(t_hidden, s_hidden)
+        for t_hidden, s_hidden in zip(t_d_outputs.hidden_states, s2t_hidden_states):
+            hidden_layers_loss += mseLoss(t_hidden, s_hidden) * 0.1
 
         # -----------------------
         # teacher attention shape: (batch_size, t_n_heads, max_seq_len, max_seq_len)
         # student attention shape: (batch_size, s_n_heads, max_seq_len, max_seq_len)
         # -----------------------
         attention_loss = 0
+        split_sections = [model_cfg.s_n_heads] * (model_cfg.t_n_heads // model_cfg.s_n_heads)
         for t_atten, s_atten in zip(t_d_outputs.attentions, s_d_outputs.attentions):
-            split_sections = [model_cfg.s_n_heads] * (model_cfg.t_n_heads // model_cfg.s_n_heads)
             split_t_attens = torch.split(t_atten, split_sections, dim=1)
             for i, split_t_atten in enumerate(split_t_attens):
                 attention_loss += mseLoss(torch.mean(split_t_atten, dim=1), s_atten[:, i, :, :])
@@ -238,7 +238,8 @@ def main(train_cfg='config/electra_pretrain.json',
         total_loss = electra_loss + soft_logits_loss + hidden_layers_loss + attention_loss
 
         writer.add_scalars('data/scalar_group',
-                           {'electra_loss': electra_loss.item(),
+                           {'generator_loss': g_outputs.loss.item(),
+                            'discriminator_loss': s_d_outputs.loss.item(),
                             'soft_logits_loss': soft_logits_loss.item(),
                             'hidden_layers_loss': hidden_layers_loss.item(),
                             'attention_loss': attention_loss.item(),
@@ -246,7 +247,8 @@ def main(train_cfg='config/electra_pretrain.json',
                             'lr': optimizer.get_lr()[0]},
                            global_step)
 
-        print(f'\tElectra Loss {electra_loss.item():.3f}\t'
+        print(f'\tGenerator Loss {g_outputs.loss.item():.3f}\t'
+              f'Discriminator Loss {s_d_outputs.loss.item():.3f}\t'
               f'Soft Logits Loss {soft_logits_loss.item():.3f}\t'
               f'Hidden Loss {hidden_layers_loss.item():.3f}\t'
               f'Attention Loss {attention_loss.item():.3f}\t'

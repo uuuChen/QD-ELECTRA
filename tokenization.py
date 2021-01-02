@@ -73,7 +73,8 @@ def convert_tokens_to_ids(vocab, tokens):
     """Converts a sequence of tokens into ids using the vocab."""
     ids = []
     for token in tokens:
-        ids.append(vocab[token])
+        if token in vocab:
+            ids.append(vocab[token]) if token in vocab else ids.append(vocab['[UNK]'])
     return ids
 
 

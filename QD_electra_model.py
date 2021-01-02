@@ -73,11 +73,11 @@ class DistillELECTRA(nn.Module):
                                            output_hidden_states=True)
 
         # Map student hidden states to teacher hidden states and return
-        s2t_hiddens = list()
+        s2t_hidden_states = list()
         for i, hidden_state in enumerate(s_d_outputs.hidden_states):
-            s2t_hiddens.append(self.fit_hidden_dense(hidden_state))
+            s2t_hidden_states.append(self.fit_hidden_dense(hidden_state))
 
-        return g_outputs, t_d_outputs, s_d_outputs, s2t_hiddens
+        return g_outputs, t_d_outputs, s_d_outputs, s2t_hidden_states
 
 
 class QuantizedDistillELECTRA(nn.Module):
