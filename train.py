@@ -24,8 +24,8 @@ class Config(NamedTuple):
     warmup: float = 0.1
     save_steps: int = 100 # interval for saving model
     total_steps: int = 100000 # total number of steps to train
-    temperature: int = 1  # temperature for distillation
-    lambda_: int = 50
+    temperature: int = 1 # temperature for QD-electra logit loss
+    lambda_: int = 50 # lambda for QD-electra discriminator loss
 
     @classmethod
     def from_json(cls, file): # load config from json file
