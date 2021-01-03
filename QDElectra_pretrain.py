@@ -244,24 +244,24 @@ def main(train_cfg='config/electra_pretrain.json',
             hidden_layers_loss += mseLoss(t_hidden, s_hidden)
 
         # -----------------------
-        # teacher attention shape: (batch_size, t_n_heads, max_seq_len, max_seq_len)
-        # student attention shape: (batch_size, s_n_heads, max_seq_len, max_seq_len)
+        # teacher attention shape per layer : (batch_size, t_n_heads, max_seq_len, max_seq_len)
+        # student attention shape per layer : (batch_size, s_n_heads, max_seq_len, max_seq_len)
         # -----------------------
-        attention_loss = 0
+        atten_layers_loss = 0
         split_sections = [model_cfg.s_n_heads] * (model_cfg.t_n_heads // model_cfg.s_n_heads)
         for t_atten, s_atten in zip(t_d_outputs.attentions, s_d_outputs.attentions):
             split_t_attens = torch.split(t_atten, split_sections, dim=1)
             for i, split_t_atten in enumerate(split_t_attens):
-                attention_loss += mseLoss(torch.mean(split_t_atten, dim=1), s_atten[:, i, :, :])
+                atten_layers_loss += mseLoss(torch.mean(split_t_atten, dim=1), s_atten[:, i, :, :])
 
-        total_loss = electra_loss + soft_logits_loss + hidden_layers_loss + attention_loss
+        total_loss = electra_loss + soft_logits_loss + hidden_layers_loss + atten_layers_loss
 
         writer.add_scalars('data/scalar_group',
                            {'generator_loss': g_outputs.loss.item(),
                             'discriminator_loss': s_d_outputs.loss.item(),
                             'soft_logits_loss': soft_logits_loss.item(),
                             'hidden_layers_loss': hidden_layers_loss.item(),
-                            'attention_loss': attention_loss.item(),
+                            'attention_loss': atten_layers_loss.item(),
                             'total_loss': total_loss.item(),
                             'lr': optimizer.get_lr()[0]},
                            global_step)
@@ -270,7 +270,7 @@ def main(train_cfg='config/electra_pretrain.json',
               f'Discriminator Loss {s_d_outputs.loss.item():.3f}\t'
               f'Soft Logits Loss {soft_logits_loss.item():.3f}\t'
               f'Hidden Loss {hidden_layers_loss.item():.3f}\t'
-              f'Attention Loss {attention_loss.item():.3f}\t'
+              f'Attention Loss {atten_layers_loss.item():.3f}\t'
               f'Total Loss {total_loss.item():.3f}\t')
 
         return total_loss
