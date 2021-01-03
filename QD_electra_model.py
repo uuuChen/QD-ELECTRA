@@ -16,7 +16,6 @@ import torch.nn.functional as F
 class Config(NamedTuple):
     "Configuration for BERT model"
     vocab_size: int = None # Size of Vocabulary
-    dim: int = 768 # Dimension of Hidden Layer in Transformer Encoder
     n_layers: int = 12 # Numher of Hidden Layers
     t_n_heads: int = 12 # Numher of Teacher Heads in Multi-Headed Attention Layers
     s_n_heads: int = 4 # Numher of Student Heads in Multi-Headed Attention Layers
@@ -25,8 +24,7 @@ class Config(NamedTuple):
     # activ_fn: str = "gelu" # Non-linear Activation Function Type in Hidden Layers
     p_drop_hidden: float = 0.1 # Probability of Dropout of various Hidden Layers
     p_drop_attn: float = 0.1 # Probability of Dropout of Attention Layers
-    max_len: int = 512 # Maximum Length for Positional Embeddings
-    n_segments: int = 2 # Number of Sentence Segments
+    max_len: int = 128 # Maximum Length for Positional Embeddings
 
     @classmethod
     def from_json(cls, file):
@@ -58,7 +56,7 @@ class DistillELECTRA(nn.Module):
                                    labels=labels,
                                    output_attentions=True,
                                    output_hidden_states=True)
-        g_outputs_ids = torch.argmax(g_outputs.logits, axis=2)  # g_outputs.logits shape: (batch_size, max_seq_len,
+        g_outputs_ids = torch.argmax(g_outputs.logits, dim=2)  # g_outputs.logits shape: (batch_size, max_seq_len,
         # vocab_size)
 
         # Discriminator

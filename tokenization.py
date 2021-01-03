@@ -74,7 +74,9 @@ def convert_tokens_to_ids(vocab, tokens):
     ids = []
     for token in tokens:
         if token in vocab:
-            ids.append(vocab[token]) if token in vocab else ids.append(vocab['[UNK]'])
+            ids.append(vocab[token])
+        else:
+            ids.append(vocab['[UNK]'])
     return ids
 
 

@@ -72,12 +72,12 @@ class Trainer(object):
                     self.save(global_step)
 
                 if self.train_cfg.total_steps and self.train_cfg.total_steps < global_step:
-                    print('Epoch %d/%d : Average Loss %5.3f'%(e+1, self.train_cfg.n_epochs, loss_sum/(i+1)))
+                    print('Epoch %d/%d : Average Loss %5.3f' % (e+1, self.train_cfg.n_epochs, loss_sum/(i+1)))
                     print('The Total Steps have been reached.')
                     self.save(global_step) # save and finish when global_steps reach total_steps
                     return
 
-            print('Epoch %d/%d : Average Loss %5.3f'%(e+1, self.train_cfg.n_epochs, loss_sum/(i+1)))
+            print('Epoch %d/%d : Average Loss %5.3f' % (e+1, self.train_cfg.n_epochs, loss_sum / (i+1)))
         self.save(global_step)
 
     def eval(self, evaluate, model_file, data_parallel=True):
@@ -120,5 +120,5 @@ class Trainer(object):
         """ save current model """
         os.makedirs(self.save_dir, exist_ok=True)
         torch.save(self.model.state_dict(), # save model object before nn.DataParallel
-            os.path.join(self.save_dir, 'model_steps_'+str(i)+'.pt'))
+            os.path.join(self.save_dir, 'model_steps_' + str(i) + '.pt'))
 

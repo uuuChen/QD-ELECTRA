@@ -117,7 +117,7 @@ class Preprocess4Pretrain(Pipeline):
         original_input_ids = self.indexer(tokens)
 
         # For masked Language Models
-        # the number of prediction is sometimes less than max_pred when sequence is short
+        # The number of prediction is sometimes less than max_pred when sequence is short
         n_pred = min(self.max_pred, max(1, int(round(len(tokens) * self.mask_prob))))
         # candidate positions of masked tokens
         cand_pos = [i for i, token in enumerate(tokens)
@@ -175,22 +175,19 @@ def main(train_cfg='config/electra_pretrain.json',
     generator = ElectraForMaskedLM.from_pretrained('google/electra-small-generator')
     t_discriminator = ElectraForPreTraining.from_pretrained('google/electra-base-discriminator')
     s_discriminator = ElectraForPreTraining.from_pretrained('google/electra-small-discriminator')
-    distillElectra = DistillELECTRA(generator,
-                                    t_discriminator,
-                                    s_discriminator,
-                                    model_cfg.t_hidden_size,
-                                    model_cfg.s_hidden_size)
+    model = DistillELECTRA(generator,
+                           t_discriminator,
+                           s_discriminator,
+                           model_cfg.t_hidden_size,
+                           model_cfg.s_hidden_size)
 
-    optimizer = optim.optim4GPU(train_cfg, distillElectra)
-    trainer = train.Trainer(train_cfg, model_cfg, distillElectra, data_iter, optimizer, save_dir, get_device())
+    optimizer = optim.optim4GPU(train_cfg, model)
+    trainer = train.Trainer(train_cfg, model_cfg, model, data_iter, optimizer, save_dir, get_device())
 
     writer = SummaryWriter(log_dir=log_dir) # for tensorboardX
 
-    bceWithLogitsLoss = nn.BCEWithLogitsLoss()
     bceLoss = nn.BCELoss()
-    nllLoss = nn.NLLLoss()
     mseLoss = nn.MSELoss()
-    # crossEntropyLoss = nn.cross
 
     def get_distillElectra_loss(model, batch, global_step, train_cfg, model_cfg): # make sure loss is tensor
         input_ids, attention_mask, token_type_ids, labels, original_input_ids = batch

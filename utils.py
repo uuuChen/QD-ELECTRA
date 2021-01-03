@@ -17,12 +17,14 @@ def set_seeds(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
 
+
 def get_device():
     "get device (CPU or GPU)"
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     n_gpu = torch.cuda.device_count()
     print("%s (%d GPUs)" % (device, n_gpu))
     return device
+
 
 def split_last(x, shape):
     "split the last dimension to given shape"
@@ -32,11 +34,13 @@ def split_last(x, shape):
         shape[shape.index(-1)] = int(x.size(-1) / -np.prod(shape))
     return x.view(*x.size()[:-1], *shape)
 
+
 def merge_last(x, n_dims):
     "merge the last n_dims to a dimension"
     s = x.size()
     assert n_dims > 1 and n_dims < len(s)
     return x.view(*s[:-n_dims], -1)
+
 
 def find_sublist(haystack, needle):
     """Return the index at which the sequence needle appears in the
@@ -58,6 +62,7 @@ def find_sublist(haystack, needle):
             return i - n + 1
     return -1
 
+
 def truncate_tokens_pair(tokens_a, tokens_b, max_len):
     while True:
         if len(tokens_a) + len(tokens_b) <= max_len:
@@ -67,9 +72,11 @@ def truncate_tokens_pair(tokens_a, tokens_b, max_len):
         else:
             tokens_b.pop()
 
+
 def get_random_word(vocab_words):
     i = random.randint(0, len(vocab_words)-1)
     return vocab_words[i]
+
 
 def get_logger(name, log_path):
     "get logger"
@@ -80,13 +87,13 @@ def get_logger(name, log_path):
     if not os.path.isfile(log_path):
         f = open(log_path, "w+")
 
-    fileHandler = logging.FileHandler(log_path)
-    fileHandler.setFormatter(fomatter)
-    logger.addHandler(fileHandler)
+    file_handler = logging.FileHandler(log_path)
+    file_handler.setFormatter(fomatter)
+    logger.addHandler(file_handler)
 
-    #streamHandler = logging.StreamHandler()
-    #streamHandler.setFormatter(fomatter)
-    #logger.addHandler(streamHandler)
+    # stream_handler = logging.StreamHandler()
+    # stream_handler.setFormatter(fomatter)
+    # logger.addHandler(stream_handler)
 
     logger.setLevel(logging.DEBUG)
     return logger
