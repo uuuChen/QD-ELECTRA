@@ -5,13 +5,15 @@
 
 from random import randint, shuffle
 import fire
+import json
+from typing import NamedTuple
 
 import torch
 import torch.nn as nn
 from tensorboardX import SummaryWriter
 from transformers import ElectraForPreTraining, ElectraForMaskedLM
-from QD_electra_model import DistillELECTRA, QuantizedDistillELECTRA
-import QD_electra_model
+from QDElectra_model import DistillELECTRA, QuantizedDistillELECTRA
+from QDElectra_model import Config as QDElectraModelConfig
 import torch.nn.functional as F
 
 import tokenization
@@ -26,6 +28,25 @@ from utils import set_seeds, get_device, truncate_tokens_pair
 #    the sentence boundaries for the "next sentence prediction" task).
 # 2. Blank lines between documents. Document boundaries are needed
 #    so that the "next sentence prediction" task doesn't span between documents.
+
+
+class QDElectraTrainConfig(NamedTuple):
+    """ Hyperparameters for training """
+    seed: int = 3431 # random seed
+    batch_size: int = 32
+    lr: int = 5e-5 # learning rate
+    n_epochs: int = 10 # the number of epoch
+    # `warm up` period = warmup(0.1)*total_steps
+    # linearly increasing learning rate from zero to the specified value(5e-5)
+    warmup: float = 0.1
+    save_steps: int = 100 # interval for saving model
+    total_steps: int = 100000 # total number of steps to train
+    temperature: int = 1 # temperature for QD-electra logit loss
+    lambda_: int = 50 # lambda for QD-electra discriminator loss
+
+    @classmethod
+    def from_json(cls, file): # load config from json file
+        return cls(**json.load(open(file, "r")))
 
 
 class SentPairDataLoader():
@@ -151,8 +172,8 @@ def main(train_cfg='config/electra_pretrain.json',
          max_pred=20,
          mask_prob=0.15):
 
-    train_cfg = train.Config.from_json(train_cfg)
-    model_cfg = QD_electra_model.Config.from_json(model_cfg)
+    train_cfg = QDElectraTrainConfig.from_json(train_cfg)
+    model_cfg = QDElectraModelConfig.from_json(model_cfg)
 
     set_seeds(train_cfg.seed)
 

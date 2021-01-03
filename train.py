@@ -13,23 +13,23 @@ import torch.nn as nn
 import checkpoint
 
 
-class Config(NamedTuple):
-    """ Hyperparameters for training """
-    seed: int = 3431 # random seed
-    batch_size: int = 32
-    lr: int = 5e-5 # learning rate
-    n_epochs: int = 10 # the number of epoch
-    # `warm up` period = warmup(0.1)*total_steps
-    # linearly increasing learning rate from zero to the specified value(5e-5)
-    warmup: float = 0.1
-    save_steps: int = 100 # interval for saving model
-    total_steps: int = 100000 # total number of steps to train
-    temperature: int = 1 # temperature for QD-electra logit loss
-    lambda_: int = 50 # lambda for QD-electra discriminator loss
-
-    @classmethod
-    def from_json(cls, file): # load config from json file
-        return cls(**json.load(open(file, "r")))
+# class Config(NamedTuple):
+#     """ Hyperparameters for training """
+#     seed: int = 3431 # random seed
+#     batch_size: int = 32
+#     lr: int = 5e-5 # learning rate
+#     n_epochs: int = 10 # the number of epoch
+#     # `warm up` period = warmup(0.1)*total_steps
+#     # linearly increasing learning rate from zero to the specified value(5e-5)
+#     warmup: float = 0.1
+#     save_steps: int = 100 # interval for saving model
+#     total_steps: int = 100000 # total number of steps to train
+#     temperature: int = 1 # temperature for QD-electra logit loss
+#     lambda_: int = 50 # lambda for QD-electra discriminator loss
+#
+#     @classmethod
+#     def from_json(cls, file): # load config from json file
+#         return cls(**json.load(open(file, "r")))
 
 
 class Trainer(object):
@@ -66,7 +66,7 @@ class Trainer(object):
 
                 global_step += 1
                 loss_sum += loss.item()
-                iter_bar.set_description('Iter (loss=%5.3f)'%loss.item())
+                iter_bar.set_description('Iter (loss=%5.3f)' % loss.item())
 
                 if global_step % self.train_cfg.save_steps == 0: # save
                     self.save(global_step)
@@ -96,7 +96,7 @@ class Trainer(object):
                 accuracy, result = evaluate(model, batch) # accuracy to print
             results.append(result)
 
-            iter_bar.set_description('Iter(acc=%5.3f)'%accuracy)
+            iter_bar.set_description('Iter(acc=%5.3f)' % accuracy)
         return results
 
     def load(self, model_file, pretrain_file):

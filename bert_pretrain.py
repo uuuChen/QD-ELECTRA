@@ -6,6 +6,9 @@
 from random import randint, shuffle
 from random import random as rand
 import fire
+import json
+from typing import NamedTuple
+from bert_model import Config as BertModelConfig
 
 import torch
 import torch.nn as nn
@@ -24,6 +27,23 @@ from utils import set_seeds, get_device, get_random_word, truncate_tokens_pair
 #    the sentence boundaries for the "next sentence prediction" task).
 # 2. Blank lines between documents. Document boundaries are needed
 #    so that the "next sentence prediction" task doesn't span between documents.
+
+
+class BertTrainConfig(NamedTuple):
+    """ Hyperparameters for training """
+    seed: int = 3431 # random seed
+    batch_size: int = 32
+    lr: int = 5e-5 # learning rate
+    n_epochs: int = 10 # the number of epoch
+    # `warm up` period = warmup(0.1)*total_steps
+    # linearly increasing learning rate from zero to the specified value(5e-5)
+    warmup: float = 0.1
+    save_steps: int = 100 # interval for saving model
+    total_steps: int = 100000 # total number of steps to train
+
+    @classmethod
+    def from_json(cls, file): # load config from json file
+        return cls(**json.load(open(file, "r")))
 
 
 def seek_random_offset(f, back_margin=2000):
@@ -205,8 +225,8 @@ def main(train_cfg='config/bert_pretrain.json',
          max_pred=20,
          mask_prob=0.15):
 
-    train_cfg = train.Config.from_json(train_cfg)
-    model_cfg = bert_model.Config.from_json(model_cfg)
+    train_cfg = BertTrainConfig.from_json(train_cfg)
+    model_cfg = BertModelConfig.from_json(model_cfg)
 
     set_seeds(train_cfg.seed)
 
