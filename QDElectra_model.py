@@ -13,8 +13,24 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class Config(NamedTuple):
-    "Configuration for BERT model"
+class ElectraModelConfig(NamedTuple):
+    "Configuration for original Electra model"
+    vocab_size: int = None # Size of Vocabulary
+    n_layers: int = 12 # Numher of Hidden Layers
+    n_heads: int = 4 # Numher of Heads in Multi-Headed Attention Layers
+    hidden_size: int = 256 # Dimension of Feed-Forward Hidden Layer of the Model
+    # activ_fn: str = "gelu" # Non-linear Activation Function Type in Hidden Layers
+    p_drop_hidden: float = 0.1 # Probability of Dropout of various Hidden Layers
+    p_drop_attn: float = 0.1 # Probability of Dropout of Attention Layers
+    max_len: int = 128 # Maximum Length for Positional Embeddings
+
+    @classmethod
+    def from_json(cls, file):
+        return cls(**json.load(open(file, "r")))
+
+
+class DElectraModelConfig(NamedTuple):
+    "Configuration for Distill-Electra model"
     vocab_size: int = None # Size of Vocabulary
     n_layers: int = 12 # Numher of Hidden Layers
     t_n_heads: int = 12 # Numher of Teacher Heads in Multi-Headed Attention Layers
@@ -29,6 +45,33 @@ class Config(NamedTuple):
     @classmethod
     def from_json(cls, file):
         return cls(**json.load(open(file, "r")))
+
+
+class ELECTRA(nn.Module):
+    def __init__(self, generator, discriminator):
+        super().__init__()
+        self.generator = generator
+        self.discriminator = discriminator
+
+    def forward(self, masked_input_ids, attention_mask, token_type_ids, labels, original_input_ids):
+        # Generator
+        g_outputs = self.generator(input_ids=masked_input_ids,
+                                   attention_mask=attention_mask,
+                                   token_type_ids=token_type_ids,
+                                   labels=labels,
+                                   output_attentions=True,
+                                   output_hidden_states=True)
+        g_outputs_ids = torch.argmax(g_outputs.logits, dim=2)  # g_outputs.logits shape: (batch_size, max_seq_len,
+        # vocab_size)
+
+        # Discriminator
+        d_labels = (original_input_ids != g_outputs_ids)
+        d_outputs = self.discriminator(g_outputs_ids,
+                                       labels=d_labels,
+                                       output_attentions=True,
+                                       output_hidden_states=True)
+
+        return g_outputs, d_outputs
 
 
 class DistillELECTRA(nn.Module):

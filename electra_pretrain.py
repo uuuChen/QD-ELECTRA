@@ -12,8 +12,8 @@ import torch
 import torch.nn as nn
 from tensorboardX import SummaryWriter
 from transformers import ElectraForPreTraining, ElectraForMaskedLM
-from QDElectra_model import DistillELECTRA, QuantizedDistillELECTRA
-from QDElectra_model import DElectraModelConfig
+from QDElectra_model import ELECTRA
+from QDElectra_model import ElectraModelConfig
 import torch.nn.functional as F
 
 import tokenization
@@ -30,7 +30,7 @@ from utils import set_seeds, get_device, truncate_tokens_pair
 #    so that the "next sentence prediction" task doesn't span between documents.
 
 
-class QDElectraTrainConfig(NamedTuple):
+class ElectraTrainConfig(NamedTuple):
     """ Hyperparameters for training """
     seed: int = 3431 # random seed
     batch_size: int = 32
@@ -41,8 +41,7 @@ class QDElectraTrainConfig(NamedTuple):
     warmup: float = 0.1
     save_steps: int = 100 # interval for saving model
     total_steps: int = 100000 # total number of steps to train
-    temperature: int = 1 # temperature for QD-electra logit loss
-    lambda_: int = 50 # lambda for QD-electra discriminator loss
+    lambda_: int = 50 # lambda for electra discriminator loss
 
     @classmethod
     def from_json(cls, file): # load config from json file
@@ -172,8 +171,8 @@ def main(train_cfg='config/electra_pretrain.json',
          max_pred=20,
          mask_prob=0.15):
 
-    train_cfg = QDElectraTrainConfig.from_json(train_cfg)
-    model_cfg = DElectraModelConfig.from_json(model_cfg)
+    train_cfg = ElectraTrainConfig.from_json(train_cfg)
+    model_cfg = ElectraModelConfig.from_json(model_cfg)
 
     set_seeds(train_cfg.seed)
 
@@ -194,88 +193,37 @@ def main(train_cfg='config/electra_pretrain.json',
 
     # Get distilled-electra and quantized-distilled-electra
     generator = ElectraForMaskedLM.from_pretrained('google/electra-small-generator')
-    t_discriminator = ElectraForPreTraining.from_pretrained('google/electra-base-discriminator')
-    s_discriminator = ElectraForPreTraining.from_pretrained('google/electra-small-discriminator')
-    model = DistillELECTRA(generator,
-                           t_discriminator,
-                           s_discriminator,
-                           model_cfg.t_hidden_size,
-                           model_cfg.s_hidden_size)
+    discriminator = ElectraForPreTraining.from_pretrained('google/electra-small-discriminator')
+    model = ELECTRA(generator, discriminator)
 
     optimizer = optim.optim4GPU(train_cfg, model)
     trainer = train.Trainer(train_cfg, model_cfg, model, data_iter, optimizer, save_dir, get_device())
 
     writer = SummaryWriter(log_dir=log_dir) # for tensorboardX
 
-    bceLoss = nn.BCELoss()
-    mseLoss = nn.MSELoss()
-
-    def get_distillElectra_loss(model, batch, global_step, train_cfg, model_cfg): # make sure loss is tensor
+    def get_electra_loss(model, batch, global_step, train_cfg, model_cfg): # make sure loss is tensor
         input_ids, attention_mask, token_type_ids, labels, original_input_ids = batch
 
-        g_outputs, t_d_outputs, s_d_outputs, s2t_hidden_states = model(
-            input_ids,
-            attention_mask,
-            token_type_ids,
-            labels,
-            original_input_ids
-        )
+        g_outputs, d_outputs = model(input_ids, attention_mask, token_type_ids, labels, original_input_ids)
 
         # Get original electra loss
-        s_d_outputs.loss *= train_cfg.lambda_
-        electra_loss = g_outputs.loss + s_d_outputs.loss
-
-        # -----------------------
-        # Get distillation loss
-        # 1. teacher and student logits (cross-entropy + temperature)
-        # 2. embedding layer loss + hidden losses (MSE)
-        # 3. attention matrices loss (MSE)
-        #       We only consider :
-        #       3-1. Teacher layer numbers equal to student layer numbers
-        #       3-2. Teacher head numbers are divisible by Student head numbers
-        # -----------------------
-        soft_logits_loss = bceLoss(
-            F.sigmoid(s_d_outputs.logits / train_cfg.temperature),
-            F.sigmoid(t_d_outputs.logits.detach() / train_cfg.temperature),
-        ) * train_cfg.temperature * train_cfg.temperature
-
-        hidden_layers_loss = 0
-        for t_hidden, s_hidden in zip(t_d_outputs.hidden_states, s2t_hidden_states):
-            hidden_layers_loss += mseLoss(t_hidden, s_hidden)
-
-        # -----------------------
-        # teacher attention shape per layer : (batch_size, t_n_heads, max_seq_len, max_seq_len)
-        # student attention shape per layer : (batch_size, s_n_heads, max_seq_len, max_seq_len)
-        # -----------------------
-        atten_layers_loss = 0
-        split_sections = [model_cfg.s_n_heads] * (model_cfg.t_n_heads // model_cfg.s_n_heads)
-        for t_atten, s_atten in zip(t_d_outputs.attentions, s_d_outputs.attentions):
-            split_t_attens = torch.split(t_atten, split_sections, dim=1)
-            for i, split_t_atten in enumerate(split_t_attens):
-                atten_layers_loss += mseLoss(torch.mean(split_t_atten, dim=1), s_atten[:, i, :, :])
-
-        total_loss = electra_loss + soft_logits_loss + hidden_layers_loss + atten_layers_loss
+        d_outputs.loss *= train_cfg.lambda_
+        total_loss = g_outputs.loss + d_outputs.loss
 
         writer.add_scalars('data/scalar_group',
                            {'generator_loss': g_outputs.loss.item(),
-                            'discriminator_loss': s_d_outputs.loss.item(),
-                            'soft_logits_loss': soft_logits_loss.item(),
-                            'hidden_layers_loss': hidden_layers_loss.item(),
-                            'attention_loss': atten_layers_loss.item(),
+                            'discriminator_loss': d_outputs.loss.item(),
                             'total_loss': total_loss.item(),
                             'lr': optimizer.get_lr()[0]},
                            global_step)
 
         print(f'\tGenerator Loss {g_outputs.loss.item():.3f}\t'
-              f'Discriminator Loss {s_d_outputs.loss.item():.3f}\t'
-              f'Soft Logits Loss {soft_logits_loss.item():.3f}\t'
-              f'Hidden Loss {hidden_layers_loss.item():.3f}\t'
-              f'Attention Loss {atten_layers_loss.item():.3f}\t'
+              f'Discriminator Loss {d_outputs.loss.item():.3f}\t'
               f'Total Loss {total_loss.item():.3f}\t')
 
         return total_loss
 
-    trainer.train(get_distillElectra_loss, model_file, None, data_parallel)
+    trainer.train(get_electra_loss, model_file, None, data_parallel)
 
 
 if __name__ == '__main__':
