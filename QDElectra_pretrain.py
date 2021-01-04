@@ -222,6 +222,7 @@ def main(train_cfg='config/electra_pretrain.json',
         )
 
         # Get original electra loss
+        t_d_outputs.loss *= train_cfg.lambda_  # Only used for baseline
         s_d_outputs.loss *= train_cfg.lambda_
         electra_loss = g_outputs.loss + s_d_outputs.loss
 
@@ -258,7 +259,8 @@ def main(train_cfg='config/electra_pretrain.json',
 
         writer.add_scalars('data/scalar_group',
                            {'generator_loss': g_outputs.loss.item(),
-                            'discriminator_loss': s_d_outputs.loss.item(),
+                            't_discriminator_loss': t_d_outputs.loss.item(),
+                            's_discriminator_loss': s_d_outputs.loss.item(),
                             'soft_logits_loss': soft_logits_loss.item(),
                             'hidden_layers_loss': hidden_layers_loss.item(),
                             'attention_loss': atten_layers_loss.item(),
@@ -267,7 +269,8 @@ def main(train_cfg='config/electra_pretrain.json',
                            global_step)
 
         print(f'\tGenerator Loss {g_outputs.loss.item():.3f}\t'
-              f'Discriminator Loss {s_d_outputs.loss.item():.3f}\t'
+              f'T-Discriminator Loss {t_d_outputs.loss.item():.3f}\t'
+              f'S-Discriminator Loss {s_d_outputs.loss.item():.3f}\t'
               f'Soft Logits Loss {soft_logits_loss.item():.3f}\t'
               f'Hidden Loss {hidden_layers_loss.item():.3f}\t'
               f'Attention Loss {atten_layers_loss.item():.3f}\t'
