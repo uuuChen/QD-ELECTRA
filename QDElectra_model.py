@@ -75,13 +75,7 @@ class ELECTRA(nn.Module):
 
 
 class DistillELECTRA(nn.Module):
-    def __init__(self,
-                 generator,
-                 t_discriminator,
-                 s_discriminator,
-                 t_hidden_size,
-                 s_hidden_size):
-
+    def __init__(self, generator, t_discriminator, s_discriminator, t_hidden_size, s_hidden_size):
         super().__init__()
         self.generator = generator
         self.t_discriminator = t_discriminator

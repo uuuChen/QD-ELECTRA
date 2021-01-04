@@ -7,5 +7,5 @@ python QDElectra_pretrain.py \
         --max_pred 100 \
         --max_len 128 \
         --mask_prob 0.15 \
-        --save_dir './saved_QD_electra' \
-        --log_dir './logs_QD_electra' \
+        --save_dir './saved_QDElectra' \
+        --log_dir './logs_QDElectra' \
