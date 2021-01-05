@@ -222,9 +222,9 @@ def main(train_cfg='config/electra_pretrain.json',
         )
 
         # Get original electra loss
-        t_d_outputs.loss *= train_cfg.lambda_  # Only used for baseline
+        t_d_outputs.loss *= train_cfg.lambda_
         s_d_outputs.loss *= train_cfg.lambda_
-        electra_loss = g_outputs.loss + s_d_outputs.loss
+        electra_loss = g_outputs.loss + s_d_outputs.loss + t_d_outputs.loss
 
         # -----------------------
         # Get distillation loss
@@ -233,7 +233,6 @@ def main(train_cfg='config/electra_pretrain.json',
         # 3. attention matrices loss (MSE)
         #       We only consider :
         #       3-1. Teacher layer numbers equal to student layer numbers
-        #       3-2. Teacher head numbers are divisible by Student head numbers
         # -----------------------
         soft_logits_loss = bceLoss(
             F.sigmoid(s_d_outputs.logits / train_cfg.temperature),
@@ -249,7 +248,8 @@ def main(train_cfg='config/electra_pretrain.json',
         # student attention shape per layer : (batch_size, s_n_heads, max_seq_len, max_seq_len)
         # -----------------------
         atten_layers_loss = 0
-        split_sections = [model_cfg.s_n_heads] * (model_cfg.t_n_heads // model_cfg.s_n_heads)
+        split_sections = ([model_cfg.s_n_heads] * (model_cfg.t_n_heads // model_cfg.s_n_heads) +
+                          [model_cfg.t_n_heads % model_cfg.s_n_heads])
         for t_atten, s_atten in zip(t_d_outputs.attentions, s_d_outputs.attentions):
             split_t_attens = torch.split(t_atten, split_sections, dim=1)
             for i, split_t_atten in enumerate(split_t_attens):
