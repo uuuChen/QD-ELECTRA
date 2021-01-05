@@ -242,7 +242,7 @@ def main(train_cfg='config/electra_pretrain.json',
 
         hidden_layers_loss = 0
         for t_hidden, s_hidden in zip(t_d_outputs.hidden_states, s2t_hidden_states):
-            hidden_layers_loss += mseLoss(t_hidden, s_hidden)
+            hidden_layers_loss += mseLoss(s_hidden, t_hidden.detach())
 
         # -----------------------
         # teacher attention shape per layer : (batch_size, t_n_heads, max_seq_len, max_seq_len)
@@ -251,9 +251,9 @@ def main(train_cfg='config/electra_pretrain.json',
         atten_layers_loss = 0
         split_sections = [model_cfg.s_n_heads] * (model_cfg.t_n_heads // model_cfg.s_n_heads)
         for t_atten, s_atten in zip(t_d_outputs.attentions, s_d_outputs.attentions):
-            split_t_attens = torch.split(t_atten, split_sections, dim=1)
+            split_t_attens = torch.split(t_atten.detach(), split_sections, dim=1)
             for i, split_t_atten in enumerate(split_t_attens):
-                atten_layers_loss += mseLoss(torch.mean(split_t_atten, dim=1), s_atten[:, i, :, :])
+                atten_layers_loss += mseLoss(s_atten[:, i, :, :], torch.mean(split_t_atten, dim=1))
 
         total_loss = electra_loss + soft_logits_loss + hidden_layers_loss + atten_layers_loss
 
