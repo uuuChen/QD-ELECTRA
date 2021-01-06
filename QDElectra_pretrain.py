@@ -12,9 +12,10 @@ import torch
 import torch.nn as nn
 from tensorboardX import SummaryWriter
 from transformers import ElectraForPreTraining, ElectraForMaskedLM
-from QDElectra_model import DistillELECTRA, QuantizedDistillELECTRA
-from QDElectra_model import DElectraModelConfig
+from QDElectra_model import DistillELECTRA, QuantizedDistillELECTRA, QuantizedElectraForPreTraining
+from QDElectra_model import DistillElectraModelConfig
 import torch.nn.functional as F
+from transformers import ElectraConfig
 
 import tokenization
 import optim
@@ -30,7 +31,7 @@ from utils import set_seeds, get_device, truncate_tokens_pair
 #    so that the "next sentence prediction" task doesn't span between documents.
 
 
-class QDElectraTrainConfig(NamedTuple):
+class QuantizedDistillElectraTrainConfig(NamedTuple):
     """ Hyperparameters for training """
     seed: int = 3431 # random seed
     batch_size: int = 32
@@ -172,8 +173,8 @@ def main(train_cfg='config/electra_pretrain.json',
          max_pred=20,
          mask_prob=0.15):
 
-    train_cfg = QDElectraTrainConfig.from_json(train_cfg)
-    model_cfg = DElectraModelConfig.from_json(model_cfg)
+    train_cfg = QuantizedDistillElectraTrainConfig.from_json(train_cfg)
+    model_cfg = ElectraConfig().from_json_file(model_cfg)
 
     set_seeds(train_cfg.seed)
 
