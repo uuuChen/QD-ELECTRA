@@ -6,18 +6,16 @@
 import math
 import json
 from typing import NamedTuple
-
+from abc import ABC
 import numpy as np
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers.models.electra import (
+from transformers.models.electra.modeling_electra import (
     ElectraForPreTraining,
     ElectraModel,
     ElectraConfig,
-)
-
-from huggingface_electra import (
     ElectraEmbeddings,
     ElectraAttention,
     ElectraEncoder,
@@ -131,9 +129,57 @@ class DistillELECTRA(nn.Module):
         return g_outputs, t_d_outputs, s_d_outputs, s2t_hidden_states
 
 
-class QuantizedLinear(nn.Module):
-    def __init__(self):
-        super().__init__()
+# -----------------------
+# Copied from IntelLabs/nlp-architect
+# https://github.com/IntelLabs/nlp-architect/blob/master/nlp_architect/nn/torch/quantization.py
+def calc_max_quant_value(bits):
+    """Calculate the maximum symmetric quantized value according to number of bits"""
+    return 2 ** (bits - 1) - 1
+
+
+def quantize(input, scale, bits):
+    """Do linear quantization to input according to a scale and number of bits"""
+    thresh = calc_max_quant_value(bits)
+    return input.mul(scale).round().clamp(-thresh, thresh)
+
+
+def dequantize(input, scale):
+    """linear dequantization according to some scale"""
+    return input.div(scale)
+
+
+class FakeLinearQuantizationWithSTE(torch.autograd.Function):
+    """Simulates error caused by quantization. Uses Straight-Through Estimator for Back prop"""
+
+    @staticmethod
+    def forward(ctx, input, scale, bits=8):
+        """fake quantize input according to scale and number of bits, dequantize
+        quantize(input))"""
+        return dequantize(quantize(input, scale, bits), scale)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        """Calculate estimated gradients for fake quantization using
+        Straight-Through Estimator (STE) according to:
+        https://openreview.net/pdf?id=B1ae1lZRb"""
+        return grad_output, None, None
+
+
+_fake_quantize = FakeLinearQuantizationWithSTE.apply
+# -----------------------
+
+
+class QuantizedLayer(ABC):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(self, input):
+        return super().forward(input)
+
+
+class QuantizedLinear(QuantizedLayer, nn.Linear):
+    def __init__(self, in_features, out_features, bias=True):
+        super().__init__(in_features, out_features, bias)
 
 
 class QuantizedElectraEmbeddings(ElectraEmbeddings):
@@ -141,16 +187,20 @@ class QuantizedElectraEmbeddings(ElectraEmbeddings):
         super().__init__(config)
 
 
+class QuantizedElectraEncoder(ElectraEncoder):
+    def __init__(self, config):
+        super().__init__(config)
+
+
 class QuantizedElectraModel(ElectraModel):
     def __init__(self, config):
         super().__init__(config)
-        # self.embeddings = QuantizedElectraEmbeddings(config)
-        #
-        # if config.embedding_size != config.hidden_size:
-        #     self.embeddings_project = nn.Linear(config.embedding_size, config.hidden_size)
-        #
-        # self.encoder = ElectraEncoder(config)
-        # self.config = config
+        self.embeddings = QuantizedElectraEmbeddings(config)
+
+        if config.embedding_size != config.hidden_size:
+            self.embeddings_project = QuantizedLinear(config.embedding_size, config.hidden_size)
+
+        self.encoder = QuantizedElectraEncoder(config)
 
 
 class QuantizedElectraForPreTraining(ElectraForPreTraining):
@@ -169,9 +219,6 @@ class QuantizedDistillELECTRA(nn.Module):
         self.s_hidden_size = s_hidden_size
 
         self.fit_hidden_dense = nn.Linear(self.s_hidden_size, self.t_hidden_size)
-
-    def _quantized(self):
-        pass
 
     def forward(self, masked_input_ids, attention_mask, token_type_ids, labels, original_input_ids):
         # Generator
@@ -202,11 +249,9 @@ class QuantizedDistillELECTRA(nn.Module):
 
         return g_outputs, t_d_outputs, s_d_outputs, s2t_hidden_states
 
-    def backward(self):
-        pass
-
 
 if __name__ == '__main__':
     model_cfg = ElectraConfig().from_json_file('config/QDElectra_base.json')
-    model = QuantizedElectraForPreTraining(model_cfg).from_pretrained('google/electra-small-discriminator')
+    model = ElectraForPreTraining(model_cfg).from_pretrained('google/electra-small-discriminator')
+    print(model)
 

@@ -196,12 +196,27 @@ def main(train_cfg='config/electra_pretrain.json',
     # Get distilled-electra and quantized-distilled-electra
     generator = ElectraForMaskedLM.from_pretrained('google/electra-small-generator')
     t_discriminator = ElectraForPreTraining.from_pretrained('google/electra-base-discriminator')
-    s_discriminator = ElectraForPreTraining.from_pretrained('google/electra-small-discriminator')
-    model = DistillELECTRA(generator,
-                           t_discriminator,
-                           s_discriminator,
-                           model_cfg.t_hidden_size,
-                           model_cfg.s_hidden_size)
+
+    # -----------------------
+    # DistillElectra
+    # -----------------------
+    # s_discriminator = ElectraForPreTraining.from_pretrained('google/electra-small-discriminator')
+    # model = DistillELECTRA(generator,
+    #                        t_discriminator,
+    #                        s_discriminator,
+    #                        model_cfg.t_hidden_size,
+    #                        model_cfg.s_hidden_size)
+
+    # -----------------------
+    # QuantizedDistillElectra
+    # -----------------------
+    s_discriminator = QuantizedElectraForPreTraining(model_cfg).from_pretrained('google/electra-small-discriminator')
+    model = QuantizedDistillELECTRA(generator,
+                                    t_discriminator,
+                                    s_discriminator,
+                                    model_cfg.t_hidden_size,
+                                    model_cfg.s_hidden_size)
+
 
     optimizer = optim.optim4GPU(train_cfg, model)
     trainer = train.Trainer(train_cfg, model_cfg, model, data_iter, optimizer, save_dir, get_device())
