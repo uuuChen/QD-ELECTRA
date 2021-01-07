@@ -13,7 +13,6 @@ import torch.nn as nn
 from tensorboardX import SummaryWriter
 from transformers import ElectraForPreTraining, ElectraForMaskedLM
 from QDElectra_model import DistillELECTRA, QuantizedDistillELECTRA, QuantizedElectraForPreTraining
-from QDElectra_model import DistillElectraModelConfig
 import torch.nn.functional as F
 from transformers import ElectraConfig
 
@@ -210,13 +209,13 @@ def main(train_cfg='config/electra_pretrain.json',
     # -----------------------
     # QuantizedDistillElectra
     # -----------------------
-    s_discriminator = QuantizedElectraForPreTraining(model_cfg).from_pretrained('google/electra-small-discriminator')
+    s_discriminator = QuantizedElectraForPreTraining(model_cfg).from_pretrained(
+        'google/electra-small-discriminator', config=model_cfg)
     model = QuantizedDistillELECTRA(generator,
                                     t_discriminator,
                                     s_discriminator,
                                     model_cfg.t_hidden_size,
                                     model_cfg.s_hidden_size)
-
 
     optimizer = optim.optim4GPU(train_cfg, model)
     trainer = train.Trainer(train_cfg, model_cfg, model, data_iter, optimizer, save_dir, get_device())

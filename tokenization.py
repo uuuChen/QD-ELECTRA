@@ -112,7 +112,6 @@ class FullTokenizer(object):
         return convert_to_unicode(text)
 
 
-
 class BasicTokenizer(object):
     """Runs basic tokenization (punctuation splitting, lower casing, etc.)."""
 
