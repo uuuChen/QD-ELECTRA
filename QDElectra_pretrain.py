@@ -180,17 +180,23 @@ def main(train_cfg='config/electra_pretrain.json',
     tokenizer = tokenization.FullTokenizer(vocab_file=vocab, do_lower_case=True)
     tokenize = lambda x: tokenizer.tokenize(tokenizer.convert_to_unicode(x))
 
-    pipeline = [Preprocess4Pretrain(max_pred,
-                                    mask_prob,
-                                    list(tokenizer.vocab.keys()),
-                                    tokenizer.convert_tokens_to_ids,
-                                    max_len)]
+    pipeline = [
+        Preprocess4Pretrain(
+            max_pred,
+            mask_prob,
+            list(tokenizer.vocab.keys()),
+            tokenizer.convert_tokens_to_ids,
+            max_len
+        )
+    ]
 
-    data_iter = SentPairDataLoader(data_file,
-                                   train_cfg.batch_size,
-                                   tokenize,
-                                   max_len,
-                                   pipeline=pipeline)
+    data_iter = SentPairDataLoader(
+        data_file,
+        train_cfg.batch_size,
+        tokenize,
+        max_len,
+        pipeline=pipeline
+    )
 
     # Get distilled-electra and quantized-distilled-electra
     generator = ElectraForMaskedLM.from_pretrained('google/electra-small-generator')
@@ -200,22 +206,26 @@ def main(train_cfg='config/electra_pretrain.json',
     # DistillElectra
     # -----------------------
     # s_discriminator = ElectraForPreTraining.from_pretrained('google/electra-small-discriminator')
-    # model = DistillELECTRA(generator,
-    #                        t_discriminator,
-    #                        s_discriminator,
-    #                        model_cfg.t_hidden_size,
-    #                        model_cfg.s_hidden_size)
+    # model = DistillELECTRA(
+    #     generator,
+    #     t_discriminator,
+    #     s_discriminator,
+    #     model_cfg.t_hidden_size,
+    #     model_cfg.s_hidden_size
+    # )
 
     # -----------------------
     # QuantizedDistillElectra
     # -----------------------
     s_discriminator = QuantizedElectraForPreTraining(model_cfg).from_pretrained(
         'google/electra-small-discriminator', config=model_cfg)
-    model = QuantizedDistillELECTRA(generator,
-                                    t_discriminator,
-                                    s_discriminator,
-                                    model_cfg.t_hidden_size,
-                                    model_cfg.s_hidden_size)
+    model = QuantizedDistillELECTRA(
+        generator,
+        t_discriminator,
+        s_discriminator,
+        model_cfg.t_hidden_size,
+        model_cfg.s_hidden_size
+    )
 
     optimizer = optim.optim4GPU(train_cfg, model)
     trainer = train.Trainer(train_cfg, model_cfg, model, data_iter, optimizer, save_dir, get_device())
@@ -272,16 +282,18 @@ def main(train_cfg='config/electra_pretrain.json',
 
         total_loss = electra_loss + soft_logits_loss + hidden_layers_loss + atten_layers_loss
 
-        writer.add_scalars('data/scalar_group',
-                           {'generator_loss': g_outputs.loss.item(),
-                            't_discriminator_loss': t_d_outputs.loss.item(),
-                            's_discriminator_loss': s_d_outputs.loss.item(),
-                            'soft_logits_loss': soft_logits_loss.item(),
-                            'hidden_layers_loss': hidden_layers_loss.item(),
-                            'attention_loss': atten_layers_loss.item(),
-                            'total_loss': total_loss.item(),
-                            'lr': optimizer.get_lr()[0]},
-                           global_step)
+        writer.add_scalars(
+            'data/scalar_group', {
+                'generator_loss': g_outputs.loss.item(),
+                't_discriminator_loss': t_d_outputs.loss.item(),
+                's_discriminator_loss': s_d_outputs.loss.item(),
+                'soft_logits_loss': soft_logits_loss.item(),
+                'hidden_layers_loss': hidden_layers_loss.item(),
+                'attention_loss': atten_layers_loss.item(),
+                'total_loss': total_loss.item(),
+                'lr': optimizer.get_lr()[0]
+            }, global_step
+        )
 
         print(f'\tGenerator Loss {g_outputs.loss.item():.3f}\t'
               f'T-Discriminator Loss {t_d_outputs.loss.item():.3f}\t'

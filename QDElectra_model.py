@@ -36,21 +36,25 @@ class ELECTRA(nn.Module):
 
     def forward(self, masked_input_ids, attention_mask, token_type_ids, labels, original_input_ids):
         # Generator
-        g_outputs = self.generator(input_ids=masked_input_ids,
-                                   attention_mask=attention_mask,
-                                   token_type_ids=token_type_ids,
-                                   labels=labels,
-                                   output_attentions=True,
-                                   output_hidden_states=True)
+        g_outputs = self.generator(
+            input_ids=masked_input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            labels=labels,
+            output_attentions=True,
+            output_hidden_states=True
+        )
         g_outputs_ids = torch.argmax(g_outputs.logits, dim=2)  # g_outputs.logits shape: (batch_size, max_seq_len,
         # vocab_size)
 
         # Discriminator
         d_labels = (original_input_ids != g_outputs_ids)
-        d_outputs = self.discriminator(g_outputs_ids,
-                                       labels=d_labels,
-                                       output_attentions=True,
-                                       output_hidden_states=True)
+        d_outputs = self.discriminator(
+            g_outputs_ids,
+            labels=d_labels,
+            output_attentions=True,
+            output_hidden_states=True
+        )
 
         return g_outputs, d_outputs
 
@@ -68,25 +72,31 @@ class DistillELECTRA(nn.Module):
 
     def forward(self, masked_input_ids, attention_mask, token_type_ids, labels, original_input_ids):
         # Generator
-        g_outputs = self.generator(input_ids=masked_input_ids,
-                                   attention_mask=attention_mask,
-                                   token_type_ids=token_type_ids,
-                                   labels=labels,
-                                   output_attentions=True,
-                                   output_hidden_states=True)
+        g_outputs = self.generator(
+            input_ids=masked_input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            labels=labels,
+            output_attentions=True,
+            output_hidden_states=True
+        )
         g_outputs_ids = torch.argmax(g_outputs.logits, dim=2)  # g_outputs.logits shape: (batch_size, max_seq_len,
         # vocab_size)
 
         # Discriminator
         d_labels = (original_input_ids != g_outputs_ids)
-        t_d_outputs = self.t_discriminator(g_outputs_ids,
-                                           labels=d_labels,
-                                           output_attentions=True,
-                                           output_hidden_states=True)
-        s_d_outputs = self.s_discriminator(g_outputs_ids,
-                                           labels=d_labels,
-                                           output_attentions=True,
-                                           output_hidden_states=True)
+        t_d_outputs = self.t_discriminator(
+            g_outputs_ids,
+            labels=d_labels,
+            output_attentions=True,
+            output_hidden_states=True
+        )
+        s_d_outputs = self.s_discriminator(
+            g_outputs_ids,
+            labels=d_labels,
+            output_attentions=True,
+            output_hidden_states=True
+        )
 
         # Map student hidden states to teacher hidden states and return
         s2t_hidden_states = list()
@@ -253,15 +263,50 @@ class QuantizedLinear(QuantizedLayer, nn.Linear):
         return ema
 
 
+class QuantizedEmbedding(QuantizedLayer, nn.Embedding):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def training_quantized_forward(self, input):
+        weight_scale = self._get_dynamic_scale(self.weight, self.weight_bits)
+        fake_quantized_weight = self._fake_quantize(self.weight, weight_scale, self.weight_bits)
+        return F.embedding(
+            input,
+            fake_quantized_weight,
+            self.padding_idx,
+            self.max_norm,
+            self.norm_type,
+            self.scale_grad_by_freq,
+            self.sparse,
+        )
+
+    def inference_quantized_forward(self, input):
+        pass
+
+
 def quantied_linear_setup(config, *args, **kwargs):
     linear = QuantizedLinear.from_config(*args, **kwargs, config=config)
     return linear
+
+
+def quantied_embedding_setup(config, *args, **kwargs):
+    embedding = QuantizedEmbedding.from_config(*args, **kwargs, config=config)
+    return embedding
 # -----------------------
 
 
 class QuantizedElectraEmbeddings(ElectraEmbeddings):
     def __init__(self, config):
         super().__init__(config)
+        self.word_embeddings = quantied_embedding_setup(
+            config, config.vocab_size, config.embedding_size, padding_idx=config.pad_token_id
+        )
+        self.position_embeddings = quantied_embedding_setup(
+            config, config.max_position_embeddings, config.embedding_size
+        )
+        self.token_type_embeddings = quantied_embedding_setup(
+            config, config.type_vocab_size, config.embedding_size
+        )
 
 
 class QuantizedElectraEncoder(ElectraEncoder):
@@ -299,25 +344,31 @@ class QuantizedDistillELECTRA(nn.Module):
 
     def forward(self, masked_input_ids, attention_mask, token_type_ids, labels, original_input_ids):
         # Generator
-        g_outputs = self.generator(input_ids=masked_input_ids,
-                                   attention_mask=attention_mask,
-                                   token_type_ids=token_type_ids,
-                                   labels=labels,
-                                   output_attentions=True,
-                                   output_hidden_states=True)
+        g_outputs = self.generator(
+            input_ids=masked_input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            labels=labels,
+            output_attentions=True,
+            output_hidden_states=True
+        )
         g_outputs_ids = torch.argmax(g_outputs.logits, dim=2)  # g_outputs.logits shape: (batch_size, max_seq_len,
         # vocab_size)
 
         # Discriminator
         d_labels = (original_input_ids != g_outputs_ids)
-        t_d_outputs = self.t_discriminator(g_outputs_ids,
-                                           labels=d_labels,
-                                           output_attentions=True,
-                                           output_hidden_states=True)
-        s_d_outputs = self.s_discriminator(g_outputs_ids,
-                                           labels=d_labels,
-                                           output_attentions=True,
-                                           output_hidden_states=True)
+        t_d_outputs = self.t_discriminator(
+            g_outputs_ids,
+            labels=d_labels,
+            output_attentions=True,
+            output_hidden_states=True
+        )
+        s_d_outputs = self.s_discriminator(
+            g_outputs_ids,
+            labels=d_labels,
+            output_attentions=True,
+            output_hidden_states=True
+        )
 
         # Map student hidden states to teacher hidden states and return
         s2t_hidden_states = list()
