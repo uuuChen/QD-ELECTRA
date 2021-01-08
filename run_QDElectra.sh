@@ -9,3 +9,4 @@ python QDElectra_pretrain.py \
         --mask_prob 0.15 \
         --save_dir './saved_QDElectra' \
         --log_dir './logs_QDElectra' \
+        --quantize True \

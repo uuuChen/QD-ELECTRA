@@ -170,7 +170,8 @@ def main(train_cfg='config/electra_pretrain.json',
          log_dir='../exp/electra/pretrain/runs',
          max_len=128,
          max_pred=20,
-         mask_prob=0.15):
+         mask_prob=0.15,
+         quantize=False):
 
     train_cfg = QuantizedDistillElectraTrainConfig.from_json(train_cfg)
     model_cfg = ElectraConfig().from_json_file(model_cfg)
@@ -193,18 +194,8 @@ def main(train_cfg='config/electra_pretrain.json',
     # Get distilled-electra and quantized-distilled-electra
     generator = ElectraForMaskedLM.from_pretrained('google/electra-small-generator')
     t_discriminator = ElectraForPreTraining.from_pretrained('google/electra-base-discriminator')
-
-    # -----------------------
-    # DistillElectra
-    # -----------------------
-    # s_discriminator = ElectraForPreTraining.from_pretrained('google/electra-small-discriminator')
-
-    # -----------------------
-    # QuantizedDistillElectra
-    # -----------------------
-    s_discriminator = QuantizedElectraForPreTraining(model_cfg).from_pretrained(
-        'google/electra-small-discriminator', config=model_cfg
-    )
+    s_discriminator = QuantizedElectraForPreTraining(model_cfg) if quantize else ElectraForPreTraining
+    s_discriminator = s_discriminator.from_pretrained('google/electra-small-discriminator', config=model_cfg)
     model = DistillElectraForPreTraining(
         generator, t_discriminator, s_discriminator, model_cfg.t_hidden_size, model_cfg.s_hidden_size
     )
