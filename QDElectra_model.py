@@ -15,6 +15,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers.models.electra.modeling_electra import (
     ElectraForPreTraining,
+    ElectraDiscriminatorPredictions,
     ElectraModel,
     ElectraConfig,
     ElectraEmbeddings,
@@ -24,7 +25,7 @@ from transformers.models.electra.modeling_electra import (
     ElectraLayer,
     ElectraOutput,
     ElectraSelfAttention,
-    ElectraSelfOutput
+    ElectraSelfOutput,
 )
 
 
@@ -50,7 +51,10 @@ class ELECTRA(nn.Module):
         # Discriminator
         d_labels = (original_input_ids != g_outputs_ids)
         d_outputs = self.discriminator(
-            g_outputs_ids, labels=d_labels, output_attentions=True, output_hidden_states=True
+            g_outputs_ids,
+            labels=d_labels,
+            output_attentions=True,
+            output_hidden_states=True
         )
 
         return g_outputs, d_outputs
@@ -67,7 +71,14 @@ class DistillElectraForPreTraining(nn.Module):
 
         self.fit_hidden_dense = nn.Linear(self.s_hidden_size, self.t_hidden_size)
 
-    def forward(self, masked_input_ids, attention_mask, token_type_ids, labels, original_input_ids):
+    def forward(self,
+                masked_input_ids,
+                attention_mask,
+                token_type_ids,
+                labels,
+                original_input_ids,
+                original_attention_mask):
+
         # Generator
         g_outputs = self.generator(
             masked_input_ids,
@@ -77,16 +88,26 @@ class DistillElectraForPreTraining(nn.Module):
             output_attentions=True,
             output_hidden_states=True
         )
+
         g_outputs_ids = torch.argmax(g_outputs.logits, dim=2)  # g_outputs.logits shape: (batch_size, max_seq_len,
         # vocab_size)
 
         # Discriminator
         d_labels = (original_input_ids != g_outputs_ids)
+
         t_d_outputs = self.t_discriminator(
-            g_outputs_ids, labels=d_labels, output_attentions=True, output_hidden_states=True
+            g_outputs_ids,
+            attention_mask=original_attention_mask,
+            labels=d_labels,
+            output_attentions=True,
+            output_hidden_states=True
         )
         s_d_outputs = self.s_discriminator(
-            g_outputs_ids, labels=d_labels, output_attentions=True, output_hidden_states=True
+            g_outputs_ids,
+            attention_mask=original_attention_mask,
+            labels=d_labels,
+            output_attentions=True,
+            output_hidden_states=True
         )
 
         # Map student hidden states to teacher hidden states and return
@@ -215,6 +236,8 @@ class QuantizedLinear(QuantizedLayer, nn.Linear):
         if self.mode == QuantizationMode.EMA:
             self.input_ema_thresh = self._update_ema(self.input_ema_thresh, input.detach())
 
+        # print(f'input : {len(input.unique())}')
+
         input_scale = self._get_activation_scale(input, self.input_ema_thresh)
         weight_scale = self._get_dynamic_scale(self.weight, self.weight_bits)
 
@@ -226,8 +249,9 @@ class QuantizedLinear(QuantizedLayer, nn.Linear):
         if self.requantize_output:
             if self.mode == QuantizationMode.EMA:
                 self.output_ema_thresh = self._update_ema(self.output_ema_thresh, out.detach())
-            output_scale = self._get_activation_scale(input, self.output_ema_thresh)
+            output_scale = self._get_activation_scale(out, self.output_ema_thresh)
             out = self._fake_quantize(out, output_scale, self.activation_bits)
+            # print(f'output : {len(out.unique())}')
 
         return out
 
@@ -275,12 +299,12 @@ class QuantizedEmbedding(QuantizedLayer, nn.Embedding):
         pass
 
 
-def quantied_linear_setup(config, *args, **kwargs):
+def quantized_linear_setup(config, *args, **kwargs):
     linear = QuantizedLinear.from_config(*args, **kwargs, config=config)
     return linear
 
 
-def quantied_embedding_setup(config, *args, **kwargs):
+def quantized_embedding_setup(config, *args, **kwargs):
     embedding = QuantizedEmbedding.from_config(*args, **kwargs, config=config)
     return embedding
 # -----------------------
@@ -289,13 +313,13 @@ def quantied_embedding_setup(config, *args, **kwargs):
 class QuantizedElectraEmbeddings(ElectraEmbeddings):
     def __init__(self, config):
         super().__init__(config)
-        self.word_embeddings = quantied_embedding_setup(
+        self.word_embeddings = quantized_embedding_setup(
             config, config.vocab_size, config.embedding_size, padding_idx=config.pad_token_id
         )
-        self.position_embeddings = quantied_embedding_setup(
+        self.position_embeddings = quantized_embedding_setup(
             config, config.max_position_embeddings, config.embedding_size
         )
-        self.token_type_embeddings = quantied_embedding_setup(
+        self.token_type_embeddings = quantized_embedding_setup(
             config, config.type_vocab_size, config.embedding_size
         )
 
@@ -303,11 +327,28 @@ class QuantizedElectraEmbeddings(ElectraEmbeddings):
 class QuantizedElectraSelfAttention(ElectraSelfAttention):
     def __init__(self, config):
         super().__init__(config)
+        self.query = quantized_linear_setup(
+            config, config.hidden_size, self.all_head_size
+        )
+        self.key = quantized_linear_setup(
+            config, config.hidden_size, self.all_head_size
+        )
+        self.value = quantized_linear_setup(
+            config, config.hidden_size, self.all_head_size
+        )
+
+        if self.position_embedding_type == "relative_key" or self.position_embedding_type == "relative_key_query":
+            self.distance_embedding = quantized_embedding_setup(
+                config, 2 * config.max_position_embeddings - 1, self.attention_head_size
+            )
 
 
 class QuantizedElectraSelfOutput(ElectraSelfOutput):
     def __init__(self, config):
         super().__init__(config)
+        self.dense = quantized_linear_setup(
+            config, config.hidden_size, config.hidden_size
+        )
 
 
 class QuantizedElectraAttention(ElectraAttention):
@@ -320,16 +361,23 @@ class QuantizedElectraAttention(ElectraAttention):
 class QuantizedElectraIntermediate(ElectraIntermediate):
     def __init__(self, config):
         super().__init__(config)
+        self.dense = quantized_linear_setup(
+            config, config.hidden_size, config.intermediate_size
+        )
 
 
 class QuantizedElectraOutput(ElectraOutput):
     def __init__(self, config):
         super().__init__(config)
+        self.dense = quantized_linear_setup(
+            config, config.intermediate_size, config.hidden_size
+        )
 
 
 class QuantizedElectraLayer(ElectraLayer):
     def __init__(self, config):
         super().__init__(config)
+        self.attention = QuantizedElectraAttention(config)
         if self.add_cross_attention:
             assert self.is_decoder, f"{self} should be used as a decoder model if cross attention is added"
             self.crossattention = QuantizedElectraAttention(config)
@@ -349,21 +397,34 @@ class QuantizedElectraModel(ElectraModel):
         self.embeddings = QuantizedElectraEmbeddings(config)
 
         if config.embedding_size != config.hidden_size:
-            self.embeddings_project = quantied_linear_setup(config, config.embedding_size, config.hidden_size)
+            self.embeddings_project = quantized_linear_setup(config, config.embedding_size, config.hidden_size)
 
         self.encoder = QuantizedElectraEncoder(config)
+
+
+class QuantizedElectraDiscriminatorPredictions(ElectraDiscriminatorPredictions):
+    def __init__(self, config):
+        super().__init__(config)
+        self.dense = quantized_linear_setup(
+            config, config.hidden_size, config.hidden_size
+        )
+        self.dense_prediction = quantized_linear_setup(
+            config, config.hidden_size, 1
+        )
 
 
 class QuantizedElectraForPreTraining(ElectraForPreTraining):
     def __init__(self, config):
         super().__init__(config)
         self.electra = QuantizedElectraModel(config)
+        self.discriminator_predictions = QuantizedElectraDiscriminatorPredictions(config)
 
 
 if __name__ == '__main__':
     model_cfg = ElectraConfig().from_json_file('config/QDElectra_base.json')
-    print(model_cfg)
-    model = ElectraForPreTraining(model_cfg).from_pretrained('google/electra-small-discriminator')
-    # print(model)
+    s_discriminator = QuantizedElectraForPreTraining(model_cfg).from_pretrained(
+        'google/electra-small-discriminator', config=model_cfg
+    )
+    print(s_discriminator)
 
 

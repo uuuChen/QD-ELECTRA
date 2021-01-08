@@ -130,6 +130,7 @@ class Preprocess4Pretrain(Pipeline):
         tokens = ['[CLS]'] + tokens_a + ['[SEP]']
         token_type_ids = [0] * self.max_len
         attention_mask = [1] * len(tokens)
+        original_attention_mask = attention_mask.copy()
 
         # Get ElectraGenerator label. "-100" means the corresponding token is unmasked, else means the masked token ids
         label = [-100] * self.max_len
@@ -157,7 +158,7 @@ class Preprocess4Pretrain(Pipeline):
         input_ids.extend([0] * n_pad)
         attention_mask.extend([0] * n_pad)
 
-        return input_ids, attention_mask, token_type_ids, label, original_input_ids
+        return input_ids, attention_mask, token_type_ids, label, original_input_ids, original_attention_mask
 
 
 def main(train_cfg='config/electra_pretrain.json',
@@ -209,10 +210,10 @@ def main(train_cfg='config/electra_pretrain.json',
     mseLoss = nn.MSELoss()
 
     def get_distillElectra_loss(model, batch, global_step, train_cfg, model_cfg): # make sure loss is tensor
-        input_ids, attention_mask, token_type_ids, labels, original_input_ids = batch
+        input_ids, attention_mask, token_type_ids, labels, original_input_ids, original_attention_mask = batch
 
         g_outputs, t_d_outputs, s_d_outputs, s2t_hidden_states = model(
-            input_ids, attention_mask, token_type_ids, labels, original_input_ids
+            input_ids, attention_mask, token_type_ids, labels, original_input_ids, original_attention_mask
         )
 
         # Get original electra loss
