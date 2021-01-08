@@ -133,7 +133,7 @@ class Preprocess4Pretrain(Pipeline):
         original_attention_mask = attention_mask.copy()
 
         # Get ElectraGenerator label. "-100" means the corresponding token is unmasked, else means the masked token ids
-        label = [-100] * self.max_len
+        g_label = [-100] * self.max_len
 
         # Get original input ids as ElectraDiscriminator labels
         original_input_ids = self.indexer(tokens)
@@ -147,7 +147,7 @@ class Preprocess4Pretrain(Pipeline):
         shuffle(cand_pos)
         for pos in cand_pos[:n_pred]:
             attention_mask[pos] = 0
-            label[pos] = self.indexer(tokens[pos])[0]  # get the only one element from list
+            g_label[pos] = self.indexer(tokens[pos])[0]  # get the only one element from list
             tokens[pos] = '[MASK]'
 
         # Token Indexing
@@ -158,7 +158,7 @@ class Preprocess4Pretrain(Pipeline):
         input_ids.extend([0] * n_pad)
         attention_mask.extend([0] * n_pad)
 
-        return input_ids, attention_mask, token_type_ids, label, original_input_ids, original_attention_mask
+        return input_ids, attention_mask, token_type_ids, g_label, original_input_ids, original_attention_mask
 
 
 def main(train_cfg='config/electra_pretrain.json',
@@ -210,10 +210,10 @@ def main(train_cfg='config/electra_pretrain.json',
     mseLoss = nn.MSELoss()
 
     def get_distillElectra_loss(model, batch, global_step, train_cfg, model_cfg): # make sure loss is tensor
-        input_ids, attention_mask, token_type_ids, labels, original_input_ids, original_attention_mask = batch
+        input_ids, attention_mask, token_type_ids, g_labels, original_input_ids, original_attention_mask = batch
 
         g_outputs, t_d_outputs, s_d_outputs, s2t_hidden_states = model(
-            input_ids, attention_mask, token_type_ids, labels, original_input_ids, original_attention_mask
+            input_ids, attention_mask, token_type_ids, g_labels, original_input_ids, original_attention_mask
         )
 
         # Get original electra loss

@@ -75,7 +75,7 @@ class DistillElectraForPreTraining(nn.Module):
                 masked_input_ids,
                 attention_mask,
                 token_type_ids,
-                labels,
+                g_labels,
                 original_input_ids,
                 original_attention_mask):
 
@@ -84,7 +84,7 @@ class DistillElectraForPreTraining(nn.Module):
             masked_input_ids,
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
-            labels=labels,
+            labels=g_labels,
             output_attentions=True,
             output_hidden_states=True
         )
