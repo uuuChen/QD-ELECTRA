@@ -11,9 +11,8 @@ from typing import NamedTuple
 import torch
 import torch.nn as nn
 from tensorboardX import SummaryWriter
-from transformers import ElectraForPreTraining, ElectraForMaskedLM
+from transformers import ElectraForPreTraining, ElectraForMaskedLM, ElectraConfig
 from QDElectra_model import ELECTRA
-from QDElectra_model import ElectraModelConfig
 import torch.nn.functional as F
 
 import tokenization
@@ -129,6 +128,7 @@ class Preprocess4Pretrain(Pipeline):
         tokens = ['[CLS]'] + tokens_a + ['[SEP]']
         token_type_ids = [0] * self.max_len
         attention_mask = [1] * len(tokens)
+        original_attention_mask = attention_mask.copy()
 
         # Get ElectraGenerator label. "-100" means the corresponding token is unmasked, else means the masked token ids
         label = [-100] * self.max_len
@@ -156,7 +156,7 @@ class Preprocess4Pretrain(Pipeline):
         input_ids.extend([0] * n_pad)
         attention_mask.extend([0] * n_pad)
 
-        return input_ids, attention_mask, token_type_ids, label, original_input_ids
+        return input_ids, attention_mask, token_type_ids, label, original_input_ids, original_attention_mask
 
 
 def main(train_cfg='config/electra_pretrain.json',
@@ -172,7 +172,7 @@ def main(train_cfg='config/electra_pretrain.json',
          mask_prob=0.15):
 
     train_cfg = ElectraTrainConfig.from_json(train_cfg)
-    model_cfg = ElectraModelConfig.from_json(model_cfg)
+    model_cfg = ElectraConfig().from_json_file(model_cfg)
 
     set_seeds(train_cfg.seed)
 
@@ -202,9 +202,7 @@ def main(train_cfg='config/electra_pretrain.json',
     writer = SummaryWriter(log_dir=log_dir) # for tensorboardX
 
     def get_electra_loss(model, batch, global_step, train_cfg, model_cfg): # make sure loss is tensor
-        input_ids, attention_mask, token_type_ids, labels, original_input_ids = batch
-
-        g_outputs, d_outputs = model(input_ids, attention_mask, token_type_ids, labels, original_input_ids)
+        g_outputs, d_outputs = model(*batch)
 
         # Get original electra loss
         d_outputs.loss *= train_cfg.lambda_

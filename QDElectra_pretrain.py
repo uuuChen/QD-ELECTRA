@@ -1,5 +1,5 @@
-# Copyright 2021 Chen-Fa-You, Tseng-Chih-Ying
-# (Strongly inspired by original Google BERT code and Hugging Face's code and Dong-Hyun Lee's code)
+# Copyright 2021 Chen-Fa-You, Tseng-Chih-Ying, NTHU
+# (Strongly inspired by original Google BERT code, Hugging Face's code and Dong-Hyun Lee's code)
 
 """ Pretrain QD-ELECTRA with Masked LM """
 

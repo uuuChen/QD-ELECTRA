@@ -1,5 +1,5 @@
-# Copyright 2018 Dong-Hyun Lee, Kakao Brain.
-# (Strongly inspired by original Google BERT code and Hugging Face's code)
+# Copyright 2021 Chen-Fa-You, Tseng-Chih-Ying, NTHU
+# (Strongly inspired by original Google BERT code, Hugging Face's code, Dong-Hyun Lee's code and Intel Q8Bert code)
 
 """ Transformer Model Classes & Config Class """
 
@@ -35,7 +35,14 @@ class ELECTRA(nn.Module):
         self.generator = generator
         self.discriminator = discriminator
 
-    def forward(self, masked_input_ids, attention_mask, token_type_ids, labels, original_input_ids):
+    def forward(self,
+                masked_input_ids,
+                attention_mask,
+                token_type_ids,
+                labels,
+                original_input_ids,
+                original_attention_mask):
+
         # Generator
         g_outputs = self.generator(
             masked_input_ids,
@@ -236,8 +243,6 @@ class QuantizedLinear(QuantizedLayer, nn.Linear):
         if self.mode == QuantizationMode.EMA:
             self.input_ema_thresh = self._update_ema(self.input_ema_thresh, input.detach())
 
-        # print(f'input : {len(input.unique())}')
-
         input_scale = self._get_activation_scale(input, self.input_ema_thresh)
         weight_scale = self._get_dynamic_scale(self.weight, self.weight_bits)
 
@@ -251,7 +256,6 @@ class QuantizedLinear(QuantizedLayer, nn.Linear):
                 self.output_ema_thresh = self._update_ema(self.output_ema_thresh, out.detach())
             output_scale = self._get_activation_scale(out, self.output_ema_thresh)
             out = self._fake_quantize(out, output_scale, self.activation_bits)
-            # print(f'output : {len(out.unique())}')
 
         return out
 
@@ -397,7 +401,9 @@ class QuantizedElectraModel(ElectraModel):
         self.embeddings = QuantizedElectraEmbeddings(config)
 
         if config.embedding_size != config.hidden_size:
-            self.embeddings_project = quantized_linear_setup(config, config.embedding_size, config.hidden_size)
+            self.embeddings_project = quantized_linear_setup(
+                config, config.embedding_size, config.hidden_size
+            )
 
         self.encoder = QuantizedElectraEncoder(config)
 
