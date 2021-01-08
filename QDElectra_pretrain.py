@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 from tensorboardX import SummaryWriter
 from transformers import ElectraForPreTraining, ElectraForMaskedLM
-from QDElectra_model import DistillELECTRA, QuantizedDistillELECTRA, QuantizedElectraForPreTraining
+from QDElectra_model import DistillElectraForPreTraining, QuantizedElectraForPreTraining
 import torch.nn.functional as F
 from transformers import ElectraConfig
 
@@ -182,20 +182,12 @@ def main(train_cfg='config/electra_pretrain.json',
 
     pipeline = [
         Preprocess4Pretrain(
-            max_pred,
-            mask_prob,
-            list(tokenizer.vocab.keys()),
-            tokenizer.convert_tokens_to_ids,
-            max_len
+            max_pred, mask_prob, list(tokenizer.vocab.keys()), tokenizer.convert_tokens_to_ids, max_len
         )
     ]
 
     data_iter = SentPairDataLoader(
-        data_file,
-        train_cfg.batch_size,
-        tokenize,
-        max_len,
-        pipeline=pipeline
+        data_file, train_cfg.batch_size, tokenize, max_len, pipeline=pipeline
     )
 
     # Get distilled-electra and quantized-distilled-electra
@@ -206,25 +198,15 @@ def main(train_cfg='config/electra_pretrain.json',
     # DistillElectra
     # -----------------------
     # s_discriminator = ElectraForPreTraining.from_pretrained('google/electra-small-discriminator')
-    # model = DistillELECTRA(
-    #     generator,
-    #     t_discriminator,
-    #     s_discriminator,
-    #     model_cfg.t_hidden_size,
-    #     model_cfg.s_hidden_size
-    # )
 
     # -----------------------
     # QuantizedDistillElectra
     # -----------------------
     s_discriminator = QuantizedElectraForPreTraining(model_cfg).from_pretrained(
-        'google/electra-small-discriminator', config=model_cfg)
-    model = QuantizedDistillELECTRA(
-        generator,
-        t_discriminator,
-        s_discriminator,
-        model_cfg.t_hidden_size,
-        model_cfg.s_hidden_size
+        'google/electra-small-discriminator', config=model_cfg
+    )
+    model = DistillElectraForPreTraining(
+        generator, t_discriminator, s_discriminator, model_cfg.t_hidden_size, model_cfg.s_hidden_size
     )
 
     optimizer = optim.optim4GPU(train_cfg, model)
@@ -239,11 +221,7 @@ def main(train_cfg='config/electra_pretrain.json',
         input_ids, attention_mask, token_type_ids, labels, original_input_ids = batch
 
         g_outputs, t_d_outputs, s_d_outputs, s2t_hidden_states = model(
-            input_ids,
-            attention_mask,
-            token_type_ids,
-            labels,
-            original_input_ids
+            input_ids, attention_mask, token_type_ids, labels, original_input_ids
         )
 
         # Get original electra loss

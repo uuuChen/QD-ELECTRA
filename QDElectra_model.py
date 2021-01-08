@@ -37,7 +37,7 @@ class ELECTRA(nn.Module):
     def forward(self, masked_input_ids, attention_mask, token_type_ids, labels, original_input_ids):
         # Generator
         g_outputs = self.generator(
-            input_ids=masked_input_ids,
+            masked_input_ids,
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
             labels=labels,
@@ -50,16 +50,13 @@ class ELECTRA(nn.Module):
         # Discriminator
         d_labels = (original_input_ids != g_outputs_ids)
         d_outputs = self.discriminator(
-            g_outputs_ids,
-            labels=d_labels,
-            output_attentions=True,
-            output_hidden_states=True
+            g_outputs_ids, labels=d_labels, output_attentions=True, output_hidden_states=True
         )
 
         return g_outputs, d_outputs
 
 
-class DistillELECTRA(nn.Module):
+class DistillElectraForPreTraining(nn.Module):
     def __init__(self, generator, t_discriminator, s_discriminator, t_hidden_size, s_hidden_size):
         super().__init__()
         self.generator = generator
@@ -73,7 +70,7 @@ class DistillELECTRA(nn.Module):
     def forward(self, masked_input_ids, attention_mask, token_type_ids, labels, original_input_ids):
         # Generator
         g_outputs = self.generator(
-            input_ids=masked_input_ids,
+            masked_input_ids,
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
             labels=labels,
@@ -86,16 +83,10 @@ class DistillELECTRA(nn.Module):
         # Discriminator
         d_labels = (original_input_ids != g_outputs_ids)
         t_d_outputs = self.t_discriminator(
-            g_outputs_ids,
-            labels=d_labels,
-            output_attentions=True,
-            output_hidden_states=True
+            g_outputs_ids, labels=d_labels, output_attentions=True, output_hidden_states=True
         )
         s_d_outputs = self.s_discriminator(
-            g_outputs_ids,
-            labels=d_labels,
-            output_attentions=True,
-            output_hidden_states=True
+            g_outputs_ids, labels=d_labels, output_attentions=True, output_hidden_states=True
         )
 
         # Map student hidden states to teacher hidden states and return
@@ -309,9 +300,35 @@ class QuantizedElectraEmbeddings(ElectraEmbeddings):
         )
 
 
+class QuantizedElectraAttention(ElectraAttention):
+    def __init__(self, config):
+        super().__init__(config)
+
+
+class QuantizedElectraIntermediate(ElectraIntermediate):
+    def __init__(self, config):
+        super().__init__(config)
+
+
+class QuantizedElectraOutput(ElectraOutput):
+    def __init__(self, config):
+        super().__init__(config)
+
+
+class QuantizedElectraLayer(ElectraLayer):
+    def __init__(self, config):
+        super().__init__(config)
+        # if self.add_cross_attention:
+        #     assert self.is_decoder, f"{self} should be used as a decoder model if cross attention is added"
+        #     self.crossattention = QuantizedElectraAttention(config)
+        # self.intermediate = QuantizedElectraIntermediate(config)
+        # self.output = QuantizedElectraOutput(config)
+
+
 class QuantizedElectraEncoder(ElectraEncoder):
     def __init__(self, config):
         super().__init__(config)
+        # self.layer = nn.ModuleList([QuantizedElectraLayer(config) for _ in range(config.num_hidden_layers)])
 
 
 class QuantizedElectraModel(ElectraModel):
@@ -329,53 +346,6 @@ class QuantizedElectraForPreTraining(ElectraForPreTraining):
     def __init__(self, config):
         super().__init__(config)
         self.electra = QuantizedElectraModel(config)
-
-
-class QuantizedDistillELECTRA(nn.Module):
-    def __init__(self, generator, t_discriminator, s_discriminator, t_hidden_size, s_hidden_size):
-        super().__init__()
-        self.generator = generator
-        self.t_discriminator = t_discriminator
-        self.s_discriminator = s_discriminator
-        self.t_hidden_size = t_hidden_size
-        self.s_hidden_size = s_hidden_size
-
-        self.fit_hidden_dense = nn.Linear(self.s_hidden_size, self.t_hidden_size)
-
-    def forward(self, masked_input_ids, attention_mask, token_type_ids, labels, original_input_ids):
-        # Generator
-        g_outputs = self.generator(
-            input_ids=masked_input_ids,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            labels=labels,
-            output_attentions=True,
-            output_hidden_states=True
-        )
-        g_outputs_ids = torch.argmax(g_outputs.logits, dim=2)  # g_outputs.logits shape: (batch_size, max_seq_len,
-        # vocab_size)
-
-        # Discriminator
-        d_labels = (original_input_ids != g_outputs_ids)
-        t_d_outputs = self.t_discriminator(
-            g_outputs_ids,
-            labels=d_labels,
-            output_attentions=True,
-            output_hidden_states=True
-        )
-        s_d_outputs = self.s_discriminator(
-            g_outputs_ids,
-            labels=d_labels,
-            output_attentions=True,
-            output_hidden_states=True
-        )
-
-        # Map student hidden states to teacher hidden states and return
-        s2t_hidden_states = list()
-        for i, hidden_state in enumerate(s_d_outputs.hidden_states):
-            s2t_hidden_states.append(self.fit_hidden_dense(hidden_state))
-
-        return g_outputs, t_d_outputs, s_d_outputs, s2t_hidden_states
 
 
 if __name__ == '__main__':
