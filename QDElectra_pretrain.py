@@ -210,11 +210,7 @@ def main(train_cfg='config/electra_pretrain.json',
     mseLoss = nn.MSELoss()
 
     def get_distillElectra_loss(model, batch, global_step, train_cfg, model_cfg): # make sure loss is tensor
-        input_ids, attention_mask, token_type_ids, g_labels, original_input_ids, original_attention_mask = batch
-
-        g_outputs, t_d_outputs, s_d_outputs, s2t_hidden_states = model(
-            input_ids, attention_mask, token_type_ids, g_labels, original_input_ids, original_attention_mask
-        )
+        g_outputs, t_d_outputs, s_d_outputs, s2t_hidden_states = model(*batch)
 
         # Get original electra loss
         t_d_outputs.loss *= train_cfg.lambda_
