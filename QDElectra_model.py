@@ -300,9 +300,21 @@ class QuantizedElectraEmbeddings(ElectraEmbeddings):
         )
 
 
+class QuantizedElectraSelfAttention(ElectraSelfAttention):
+    def __init__(self, config):
+        super().__init__(config)
+
+
+class QuantizedElectraSelfOutput(ElectraSelfOutput):
+    def __init__(self, config):
+        super().__init__(config)
+
+
 class QuantizedElectraAttention(ElectraAttention):
     def __init__(self, config):
         super().__init__(config)
+        self.self = QuantizedElectraSelfAttention(config)
+        self.output = QuantizedElectraSelfOutput(config)
 
 
 class QuantizedElectraIntermediate(ElectraIntermediate):
@@ -318,17 +330,17 @@ class QuantizedElectraOutput(ElectraOutput):
 class QuantizedElectraLayer(ElectraLayer):
     def __init__(self, config):
         super().__init__(config)
-        # if self.add_cross_attention:
-        #     assert self.is_decoder, f"{self} should be used as a decoder model if cross attention is added"
-        #     self.crossattention = QuantizedElectraAttention(config)
-        # self.intermediate = QuantizedElectraIntermediate(config)
-        # self.output = QuantizedElectraOutput(config)
+        if self.add_cross_attention:
+            assert self.is_decoder, f"{self} should be used as a decoder model if cross attention is added"
+            self.crossattention = QuantizedElectraAttention(config)
+        self.intermediate = QuantizedElectraIntermediate(config)
+        self.output = QuantizedElectraOutput(config)
 
 
 class QuantizedElectraEncoder(ElectraEncoder):
     def __init__(self, config):
         super().__init__(config)
-        # self.layer = nn.ModuleList([QuantizedElectraLayer(config) for _ in range(config.num_hidden_layers)])
+        self.layer = nn.ModuleList([QuantizedElectraLayer(config) for _ in range(config.num_hidden_layers)])
 
 
 class QuantizedElectraModel(ElectraModel):
