@@ -161,6 +161,30 @@ class Preprocess4Pretrain(Pipeline):
         return input_ids, attention_mask, token_type_ids, g_label, original_input_ids, original_attention_mask
 
 
+class TrainerForTesting(train.Trainer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def _eval(self, evaluate, data_parallel=True):
+        """ Evaluation Loop """
+        self.model.eval()  # evaluation mode
+        model = self.model.to(self.device)
+        if data_parallel:  # use Data Parallelism with Multi-GPU
+            model = nn.DataParallel(model)
+
+        results = []  # prediction results
+        from tqdm import tqdm
+        iter_bar = tqdm(self.data_iter, desc='Iter (loss=X.XXX)')
+        for batch in iter_bar:
+            batch = [t.to(self.device) for t in batch]
+            with torch.no_grad():  # evaluation without gradient calculation
+                loss = evaluate(model, batch, 0, self.train_cfg, self.model_cfg).mean()  # mean() for Data
+            results.append(loss)
+
+            iter_bar.set_description('Iter(loss=%5.3f)' % loss)
+        return results
+
+
 def main(train_cfg='config/electra_pretrain.json',
          model_cfg='config/electra_small.json',
          data_file='../tbc/books_large_all.txt',
@@ -198,11 +222,12 @@ def main(train_cfg='config/electra_pretrain.json',
     s_discriminator = QuantizedElectraForPreTraining(model_cfg) if quantize else ElectraForPreTraining
     s_discriminator = s_discriminator.from_pretrained('google/electra-small-discriminator', config=model_cfg)
     model = DistillElectraForPreTraining(
-        generator, t_discriminator, s_discriminator, model_cfg.t_hidden_size, model_cfg.s_hidden_size
+        generator, t_discriminator, s_discriminator, model_cfg
     )
 
     optimizer = optim.optim4GPU(train_cfg, model)
     trainer = train.Trainer(train_cfg, model_cfg, model, data_iter, optimizer, save_dir, get_device())
+    # trainer = TrainerForTesting(train_cfg, model_cfg, model, data_iter, optimizer, save_dir, get_device())
 
     writer = SummaryWriter(log_dir=log_dir) # for tensorboardX
 
@@ -272,6 +297,7 @@ def main(train_cfg='config/electra_pretrain.json',
         return total_loss
 
     trainer.train(get_distillElectra_loss, model_file, None, data_parallel)
+    # trainer._eval(get_distillElectra_loss)
 
 
 if __name__ == '__main__':

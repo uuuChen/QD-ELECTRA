@@ -68,15 +68,13 @@ class ELECTRA(nn.Module):
 
 
 class DistillElectraForPreTraining(nn.Module):
-    def __init__(self, generator, t_discriminator, s_discriminator, t_hidden_size, s_hidden_size):
+    def __init__(self, generator, t_discriminator, s_discriminator, config):
         super().__init__()
         self.generator = generator
         self.t_discriminator = t_discriminator
         self.s_discriminator = s_discriminator
-        self.t_hidden_size = t_hidden_size
-        self.s_hidden_size = s_hidden_size
 
-        self.fit_hidden_dense = nn.Linear(self.s_hidden_size, self.t_hidden_size)
+        self.fit_hidden_dense = nn.Linear(config.s_hidden_size, config.t_hidden_size)
 
     def forward(self,
                 masked_input_ids,
@@ -161,6 +159,9 @@ class QuantizedLayer(ABC):
         self.mode = QuantizationMode[mode.upper()]
         self.start_step = start_step
         self._step = 0
+        self._quantized_weight_for_eval = None
+        self._weight_scale_for_eval = None
+
         self._fake_quantize = FakeLinearQuantizationWithSTE.apply
 
     def forward(self, input):
@@ -176,6 +177,16 @@ class QuantizedLayer(ABC):
             out = self.inference_quantized_forward(input)
         return out
 
+    def train(self, mode=True):
+        super().train(mode)
+        if not mode:
+            self._eval()
+
+    def _eval(self):
+        weight_scale = self._get_dynamic_scale(self.weight, self.weight_bits)
+        self._weight_scale_for_eval = weight_scale
+        self._quantized_weight_for_eval = self.quantize(self.weight, weight_scale, self.weight_bits)
+
     def _get_dynamic_scale(self, x, bits, with_grad=False):
         """Calculate dynamic scale for quantization from input by taking the
         maximum absolute value from x and number of bits"""
@@ -186,6 +197,10 @@ class QuantizedLayer(ABC):
     def _get_static_scale(self, bits, threshold):
         """Calculate scale for quantization according to some constant and number of bits"""
         return self.calc_max_quant_value(bits) / threshold
+
+    @staticmethod
+    def calc_num_unique_values(values):
+        return len(values.unique())
 
     @staticmethod
     def calc_max_quant_value(bits):
@@ -260,7 +275,19 @@ class QuantizedLinear(QuantizedLayer, nn.Linear):
         return out
 
     def inference_quantized_forward(self, input):
-        pass
+        input_scale = self._get_activation_scale(input, self.input_ema_thresh)
+        bias_scale = input_scale * self._weight_scale_for_eval
+
+        quantized_input = self.quantize(input, input_scale, self.activation_bits)
+
+        out = F.linear(quantized_input, self._quantized_weight_for_eval, self.bias)
+        out = self.dequantize(out, bias_scale)
+
+        if self.requantize_output:
+            output_scale = self._get_activation_scale(out, self.output_ema_thresh)
+            out = self._fake_quantize(out, output_scale, self.activation_bits)
+
+        return out
 
     def _get_activation_scale(self, x, threshold):
         if self.mode == QuantizationMode.DYNAMIC:
@@ -300,7 +327,16 @@ class QuantizedEmbedding(QuantizedLayer, nn.Embedding):
         )
 
     def inference_quantized_forward(self, input):
-        pass
+        q_embedding = F.embedding(
+            input,
+            self._quantized_weight_for_eval,
+            self.padding_idx,
+            self.max_norm,
+            self.norm_type,
+            self.scale_grad_by_freq,
+            self.sparse,
+        )
+        return dequantize(q_embedding, self._weight_scale_for_eval)
 
 
 def quantized_linear_setup(config, *args, **kwargs):
@@ -326,6 +362,9 @@ class QuantizedElectraEmbeddings(ElectraEmbeddings):
         self.token_type_embeddings = quantized_embedding_setup(
             config, config.type_vocab_size, config.embedding_size
         )
+
+        self.LayerNorm = QuantizedLayerNorm(config.embedding_size, eps=config.layer_norm_eps)
+        self.dropout = QuantizedDropout(config.hidden_dropout_prob)
 
 
 class QuantizedElectraSelfAttention(ElectraSelfAttention):
@@ -426,11 +465,21 @@ class QuantizedElectraForPreTraining(ElectraForPreTraining):
         self.discriminator_predictions = QuantizedElectraDiscriminatorPredictions(config)
 
 
+# Completely same with original torch.nn.LayerNorm code
+class QuantizedLayerNorm(nn.LayerNorm):
+    def forward(self, input):
+        return F.layer_norm(input, self.normalized_shape, self.weight, self.bias, self.eps)
+
+
+# Completely same with original torch.nn.Dropout code
+class QuantizedDropout(nn.Dropout):
+    def forward(self, input):
+        return F.dropout(input, self.p, self.training, self.inplace)
+
+
 if __name__ == '__main__':
     model_cfg = ElectraConfig().from_json_file('config/QDElectra_base.json')
     s_discriminator = QuantizedElectraForPreTraining(model_cfg).from_pretrained(
         'google/electra-small-discriminator', config=model_cfg
     )
     print(s_discriminator)
-
-
