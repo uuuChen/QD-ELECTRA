@@ -6,6 +6,7 @@ import os
 import json
 from typing import NamedTuple
 from tqdm import tqdm
+from abc import abstractmethod
 
 import torch
 import torch.nn as nn
@@ -24,7 +25,7 @@ class Trainer(object):
         self.save_dir = save_dir
         self.device = device # device name
 
-    def train(self, get_loss, model_file=None, pretrain_file=None, data_parallel=True):
+    def train(self, model_file=None, pretrain_file=None, data_parallel=True):
         """ Train Loop """
         self.model.train() # train mode
         self.load(model_file, pretrain_file)
@@ -40,7 +41,7 @@ class Trainer(object):
                 batch = [t.to(self.device) for t in batch]
 
                 self.optimizer.zero_grad()
-                loss = get_loss(model, batch, global_step, self.train_cfg, self.model_cfg).mean() # mean() for Data
+                loss = self.get_loss(model, batch, global_step, self.train_cfg, self.model_cfg).mean() # mean() for Data
                 # Parallelism
                 loss.backward()
                 self.optimizer.step()
@@ -61,7 +62,7 @@ class Trainer(object):
             print('Epoch %d/%d : Average Loss %5.3f' % (e+1, self.train_cfg.n_epochs, loss_sum / (i+1)))
         self.save(global_step)
 
-    def eval(self, evaluate, model_file, data_parallel=True):
+    def eval(self, model_file, data_parallel=True):
         """ Evaluation Loop """
         self.model.eval() # evaluation mode
         self.load(model_file, None)
@@ -74,7 +75,7 @@ class Trainer(object):
         for batch in iter_bar:
             batch = [t.to(self.device) for t in batch]
             with torch.no_grad(): # evaluation without gradient calculation
-                accuracy, result = evaluate(model, batch) # accuracy to print
+                accuracy, result = self.evaluate(model, batch) # accuracy to print
             results.append(result)
 
             iter_bar.set_description('Iter(acc=%5.3f)' % accuracy)
@@ -102,4 +103,13 @@ class Trainer(object):
         os.makedirs(self.save_dir, exist_ok=True)
         torch.save(self.model.state_dict(), # save model object before nn.DataParallel
             os.path.join(self.save_dir, 'model_steps_' + str(i) + '.pt'))
+
+    @abstractmethod
+    def get_loss(self, model, batch, global_step, train_cfg, model_cfg):
+        return NotImplementedError
+
+    @abstractmethod
+    def evaluate(self, model, batch):
+        return NotImplementedError
+
 

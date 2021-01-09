@@ -1,5 +1,5 @@
-# Copyright 2021 Chen-Fa-You, Tseng-Chih-Ying
-# (Strongly inspired by original Google BERT code and Hugging Face's code and Dong-Hyun Lee's code)
+# Copyright 2021 Chen-Fa-You, Tseng-Chih-Ying, NTHU
+# (Strongly inspired by original Google BERT code, Hugging Face's code and Dong-Hyun Lee's code)
 
 """ Pretrain QD-ELECTRA with Masked LM """
 
@@ -7,13 +7,15 @@ from random import randint, shuffle
 import fire
 import json
 from typing import NamedTuple
+from tqdm import tqdm
 
 import torch
 import torch.nn as nn
 from tensorboardX import SummaryWriter
 from transformers import ElectraForPreTraining, ElectraForMaskedLM, ElectraConfig
-from QDElectra_model import ELECTRA
+from QDElectra_model import Electra
 import torch.nn.functional as F
+from transformers import ElectraConfig
 
 import tokenization
 import optim
@@ -131,7 +133,7 @@ class Preprocess4Pretrain(Pipeline):
         original_attention_mask = attention_mask.copy()
 
         # Get ElectraGenerator label. "-100" means the corresponding token is unmasked, else means the masked token ids
-        label = [-100] * self.max_len
+        g_label = [-100] * self.max_len
 
         # Get original input ids as ElectraDiscriminator labels
         original_input_ids = self.indexer(tokens)
@@ -145,7 +147,7 @@ class Preprocess4Pretrain(Pipeline):
         shuffle(cand_pos)
         for pos in cand_pos[:n_pred]:
             attention_mask[pos] = 0
-            label[pos] = self.indexer(tokens[pos])[0]  # get the only one element from list
+            g_label[pos] = self.indexer(tokens[pos])[0]  # get the only one element from list
             tokens[pos] = '[MASK]'
 
         # Token Indexing
@@ -156,7 +158,36 @@ class Preprocess4Pretrain(Pipeline):
         input_ids.extend([0] * n_pad)
         attention_mask.extend([0] * n_pad)
 
-        return input_ids, attention_mask, token_type_ids, label, original_input_ids, original_attention_mask
+        return input_ids, attention_mask, token_type_ids, g_label, original_input_ids, original_attention_mask
+
+
+class ElectraTrainer(train.Trainer):
+    def __init__(self, writer, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.writer = writer
+        self.bceLoss = nn.BCELoss()
+        self.mseLoss = nn.MSELoss()
+
+    def get_loss(self, model, batch, global_step, train_cfg, model_cfg): # make sure loss is tensor
+        g_outputs, d_outputs = model(*batch)
+
+        # Get original electra loss
+        d_outputs.loss *= train_cfg.lambda_
+        total_loss = g_outputs.loss + d_outputs.loss
+
+        self.writer.add_scalars(
+            'data/scalar_group',{
+                'generator_loss': g_outputs.loss.item(),
+                'discriminator_loss': d_outputs.loss.item(),
+                'total_loss': total_loss.item(),
+                'lr': self.optimizer.get_lr()[0]},
+            global_step)
+
+        print(f'\tGenerator Loss {g_outputs.loss.item():.3f}\t'
+              f'Discriminator Loss {d_outputs.loss.item():.3f}\t'
+              f'Total Loss {total_loss.item():.3f}\t')
+
+        return total_loss
 
 
 def main(train_cfg='config/electra_pretrain.json',
@@ -179,49 +210,25 @@ def main(train_cfg='config/electra_pretrain.json',
     tokenizer = tokenization.FullTokenizer(vocab_file=vocab, do_lower_case=True)
     tokenize = lambda x: tokenizer.tokenize(tokenizer.convert_to_unicode(x))
 
-    pipeline = [Preprocess4Pretrain(max_pred,
-                                    mask_prob,
-                                    list(tokenizer.vocab.keys()),
-                                    tokenizer.convert_tokens_to_ids,
-                                    max_len)]
+    pipeline = [
+        Preprocess4Pretrain(
+            max_pred, mask_prob, list(tokenizer.vocab.keys()), tokenizer.convert_tokens_to_ids, max_len
+        )
+    ]
 
-    data_iter = SentPairDataLoader(data_file,
-                                   train_cfg.batch_size,
-                                   tokenize,
-                                   max_len,
-                                   pipeline=pipeline)
+    data_iter = SentPairDataLoader(data_file, train_cfg.batch_size, tokenize, max_len, pipeline=pipeline)
 
     # Get distilled-electra and quantized-distilled-electra
     generator = ElectraForMaskedLM.from_pretrained('google/electra-small-generator')
     discriminator = ElectraForPreTraining.from_pretrained('google/electra-small-discriminator')
-    model = ELECTRA(generator, discriminator)
+    model = Electra(generator, discriminator)
 
     optimizer = optim.optim4GPU(train_cfg, model)
-    trainer = train.Trainer(train_cfg, model_cfg, model, data_iter, optimizer, save_dir, get_device())
-
     writer = SummaryWriter(log_dir=log_dir) # for tensorboardX
 
-    def get_electra_loss(model, batch, global_step, train_cfg, model_cfg): # make sure loss is tensor
-        g_outputs, d_outputs = model(*batch)
-
-        # Get original electra loss
-        d_outputs.loss *= train_cfg.lambda_
-        total_loss = g_outputs.loss + d_outputs.loss
-
-        writer.add_scalars('data/scalar_group',
-                           {'generator_loss': g_outputs.loss.item(),
-                            'discriminator_loss': d_outputs.loss.item(),
-                            'total_loss': total_loss.item(),
-                            'lr': optimizer.get_lr()[0]},
-                           global_step)
-
-        print(f'\tGenerator Loss {g_outputs.loss.item():.3f}\t'
-              f'Discriminator Loss {d_outputs.loss.item():.3f}\t'
-              f'Total Loss {total_loss.item():.3f}\t')
-
-        return total_loss
-
-    trainer.train(get_electra_loss, model_file, None, data_parallel)
+    base_trainer_args = (train_cfg, model_cfg, model, data_iter, optimizer, save_dir, get_device())
+    trainer = ElectraTrainer(writer, *base_trainer_args)
+    trainer.train(model_file, None, data_parallel)
 
 
 if __name__ == '__main__':

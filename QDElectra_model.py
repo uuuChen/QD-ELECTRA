@@ -29,7 +29,7 @@ from transformers.models.electra.modeling_electra import (
 )
 
 
-class ELECTRA(nn.Module):
+class Electra(nn.Module):
     def __init__(self, generator, discriminator):
         super().__init__()
         self.generator = generator
@@ -336,7 +336,7 @@ class QuantizedEmbedding(QuantizedLayer, nn.Embedding):
             self.scale_grad_by_freq,
             self.sparse,
         )
-        return dequantize(q_embedding, self._weight_scale_for_eval)
+        return self.dequantize(q_embedding, self._weight_scale_for_eval)
 
 
 def quantized_linear_setup(config, *args, **kwargs):
