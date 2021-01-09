@@ -186,6 +186,7 @@ class QuantizedLayer(ABC):
         weight_scale = self._get_dynamic_scale(self.weight, self.weight_bits)
         self._weight_scale_for_eval = weight_scale
         self._quantized_weight_for_eval = self.quantize(self.weight, weight_scale, self.weight_bits)
+        # print(QuantizedLayer.calc_num_unique_values(self._quantized_weight_for_eval))
 
     def _get_dynamic_scale(self, x, bits, with_grad=False):
         """Calculate dynamic scale for quantization from input by taking the
@@ -243,6 +244,7 @@ class QuantizedLinear(QuantizedLayer, nn.Linear):
     def __init__(self, *args, activation_bits=8, requantize_output=True, ema_decay=0.9999, **kwargs):
         super().__init__(*args, **kwargs)
         self.activation_bits = activation_bits
+        self.accumulation_bits = 32
         self.requantize_output = requantize_output
         self.ema_decay = ema_decay
 
@@ -253,7 +255,7 @@ class QuantizedLinear(QuantizedLayer, nn.Linear):
         """fake quantized forward, fake quantizes weights and activations,
         learn quantization ranges if quantization mode is EMA.
         This function should only be used while training"""
-        assert self.training, "should only be called when training"
+        # assert self.training, "should only be called when training"
 
         if self.mode == QuantizationMode.EMA:
             self.input_ema_thresh = self._update_ema(self.input_ema_thresh, input.detach())
@@ -279,13 +281,14 @@ class QuantizedLinear(QuantizedLayer, nn.Linear):
         bias_scale = input_scale * self._weight_scale_for_eval
 
         quantized_input = self.quantize(input, input_scale, self.activation_bits)
+        quantized_bias = self.quantize(self.bias, bias_scale, self.accumulation_bits)
 
-        out = F.linear(quantized_input, self._quantized_weight_for_eval, self.bias)
+        out = F.linear(quantized_input, self._quantized_weight_for_eval, quantized_bias)
         out = self.dequantize(out, bias_scale)
 
         if self.requantize_output:
             output_scale = self._get_activation_scale(out, self.output_ema_thresh)
-            out = self._fake_quantize(out, output_scale, self.activation_bits)
+            out = self.dequantize(self.quantize(out, output_scale, self.activation_bits), output_scale)
 
         return out
 

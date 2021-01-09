@@ -240,10 +240,12 @@ class QuantizedDistillElectraTrainer(train.Trainer):
 
         results = []  # prediction results
         iter_bar = tqdm(self.data_iter, desc='Iter (loss=X.XXX)')
+        global_step = 0
         for batch in iter_bar:
+            global_step += 1
             batch = [t.to(self.device) for t in batch]
             with torch.no_grad():  # evaluation without gradient calculation
-                loss = self.get_loss(model, batch, 0, self.train_cfg, self.model_cfg).mean()  # mean() for Data
+                loss = self.get_loss(model, batch, global_step, self.train_cfg, self.model_cfg).mean()  # mean() for Data
             results.append(loss)
 
             iter_bar.set_description('Iter(loss=%5.3f)' % loss)
