@@ -169,7 +169,7 @@ class QuantizedDistillElectraTrainer(train.Trainer):
         self.bceLoss = nn.BCELoss()
         self.mseLoss = nn.MSELoss()
 
-    def get_loss(self, model, batch, global_step, train_cfg, model_cfg): # make sure loss is tensor
+    def get_loss(self, model, batch, global_step, train_cfg, model_cfg):
         g_outputs, t_d_outputs, s_d_outputs, s2t_hidden_states = model(*batch)
 
         # Get original electra loss
@@ -232,7 +232,7 @@ class QuantizedDistillElectraTrainer(train.Trainer):
         return total_loss
 
     def _eval(self, data_parallel=True):
-        """ Evaluation inference-phase of quantized-model """
+        """ Only used to test the correctness of inference-phase of QuantizedElectra """
         self.model.eval()  # evaluation mode
         model = self.model.to(self.device)
         if data_parallel:  # use Data Parallelism with Multi-GPU

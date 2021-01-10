@@ -7,11 +7,14 @@ import itertools
 import csv
 import fire
 import json
+import numpy as np
+from scipy.stats import pearsonr, spearmanr
+from sklearn.metrics import matthews_corrcoef, f1_score
 
 import torch.nn.functional as F
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, TensorDataset
 from tensorboardX import SummaryWriter
 from transformers import (
     ElectraConfig,
@@ -19,7 +22,8 @@ from transformers import (
     ElectraForPreTraining,
     ElectraForMaskedLM,
     ElectraForMultipleChoice,
-    ElectraForSequenceClassification
+    ElectraForSequenceClassification,
+    PretrainedConfig
 )
 
 from QDElectra_model import (
@@ -92,7 +96,7 @@ class COLA(CsvDataset):
     labels = ("0", "1")
 
     def __init__(self, file, pipeline=[]):
-        super().__init__(file,pipeline)
+        super().__init__(file, pipeline)
 
     def get_instances(self, lines):
         for line in itertools.islice(lines, 1, None):
@@ -104,7 +108,7 @@ class SST2(CsvDataset):
     labels = ("0", "1")
 
     def __init__(self, file, pipeline=[]):
-        super().__init__(file,pipeline)
+        super().__init__(file, pipeline)
 
     def get_instances(self, lines):
         for line in itertools.islice(lines, 1, None):
@@ -152,7 +156,7 @@ class RTE(CsvDataset):
     labels = ("entailment", "not_entailment")
 
     def __init__(self, file, pipeline=[]):
-        super().__init__(file,pipeline)
+        super().__init__(file, pipeline)
 
     def get_instances(self, lines):
         for line in itertools.islice(lines, 1, None):
@@ -172,7 +176,7 @@ class WNLI(CsvDataset):
 
 
 def dataset_class(task_name):
-    """ Mapping from task string to Dataset Class """
+    """ Mapping from task_name string to Dataset Class """
     table = {
         'mrpc':  MRPC,
         'mnli':  MNLI,
@@ -236,11 +240,12 @@ class AddSpecialTokensWithTruncation(Pipeline):
 
 class TokenIndexing(Pipeline):
     """ Convert tokens into token indexes and do zero-padding """
-    def __init__(self, indexer, labels, max_len=512):
+    def __init__(self, indexer, labels, output_mode, max_len=512):
         super().__init__()
         self.indexer = indexer # function : tokens to indexes
         # map from a label name to a label index
         self.label_map = {name: i for i, name in enumerate(labels)}
+        self.output_mode = output_mode
         self.max_len = max_len
 
     def __call__(self, instance):
@@ -249,9 +254,12 @@ class TokenIndexing(Pipeline):
         input_ids = self.indexer(tokens_a + tokens_b)
         token_type_ids = [0]*len(tokens_a) + [1]*len(tokens_b) # token type ids
         attention_mask = [1]*(len(tokens_a) + len(tokens_b))
-
-        label_id = self.label_map[label]
-
+        if self.output_mode == "classification":
+            label_id = self.label_map[label]
+        elif self.output_mode == "regression":
+            label_id = float(label)
+        else:
+            raise KeyError(output_mode)
         # zero padding
         n_pad = self.max_len - len(input_ids)
         input_ids.extend([0]*n_pad)
@@ -261,31 +269,93 @@ class TokenIndexing(Pipeline):
         return input_ids, attention_mask, token_type_ids, label_id
 
 
-class QuantizedDistillElectraTrainConfig(NamedTuple):
-    """ Hyperparameters for training """
-    seed: int = 3431 # random seed
-    batch_size: int = 32
-    lr: int = 5e-5 # learning rate
-    n_epochs: int = 10 # the number of epoch
-    # `warm up` period = warmup(0.1)*total_steps
-    # linearly increasing learning rate from zero to the specified value(5e-5)
-    warmup: float = 0.1
-    save_steps: int = 100 # interval for saving model
-    total_steps: int = 100000 # total number of steps to train
-    temperature: int = 1 # temperature for QD-electra logit loss
-    lambda_: int = 50 # lambda for QD-electra discriminator loss
+def simple_accuracy(preds, labels):
+    return (preds == labels).mean()
 
-    @classmethod
-    def from_json(cls, file): # load config from json file
-        return cls(**json.load(open(file, "r")))
+
+def acc_and_f1(preds, labels):
+    acc = simple_accuracy(preds, labels)
+    f1 = f1_score(y_true=labels, y_pred=preds)
+    return {
+        "acc": acc,
+        "f1": f1,
+        "acc_and_f1": (acc + f1) / 2,
+    }
+
+
+def pearson_and_spearman(preds, labels):
+    pearson_corr = pearsonr(preds, labels)[0]
+    spearman_corr = spearmanr(preds, labels)[0]
+    return {
+        "pearson": pearson_corr,
+        "spearmanr": spearman_corr,
+        "corr": (pearson_corr + spearman_corr) / 2,
+    }
+
+
+def compute_metrics(task_name, preds, labels):
+    assert len(preds) == len(labels)
+    if task_name == "cola":
+        return {"mcc": matthews_corrcoef(labels, preds)}
+    elif task_name == "sst-2":
+        return {"acc": simple_accuracy(preds, labels)}
+    elif task_name == "mrpc":
+        return acc_and_f1(preds, labels)
+    elif task_name == "sts-b":
+        return pearson_and_spearman(preds, labels)
+    elif task_name == "qqp":
+        return acc_and_f1(preds, labels)
+    elif task_name == "mnli":
+        return {"acc": simple_accuracy(preds, labels)}
+    elif task_name == "mnli-mm":
+        return {"acc": simple_accuracy(preds, labels)}
+    elif task_name == "qnli":
+        return {"acc": simple_accuracy(preds, labels)}
+    elif task_name == "rte":
+        return {"acc": simple_accuracy(preds, labels)}
+    elif task_name == "wnli":
+        return {"acc": simple_accuracy(preds, labels)}
+    else:
+        raise KeyError(task_name)
+
+
+def get_task_params(task_name):
+    output_modes = {
+        "cola":  "classification",
+        "mnli":  "classification",
+        "mrpc":  "classification",
+        "sst-2": "classification",
+        "sts-b": "regression",
+        "qqp":   "classification",
+        "qnli":  "classification",
+        "rte":   "classification",
+        "wnli":  "classification"
+    }
+
+    # intermediate distillation default parameters
+    default_params = {
+        "cola":  {"n_epochs": 50, "max_len": 64},
+        "mnli":  {"n_epochs": 5,  "max_len": 128},
+        "mrpc":  {"n_epochs": 20, "max_len": 128},
+        "sst-2": {"n_epochs": 10, "max_len": 64},
+        "sts-b": {"n_epochs": 20, "max_len": 128},
+        "qqp":   {"n_epochs": 5,  "max_len": 128},
+        "qnli":  {"n_epochs": 10, "max_len": 128},
+        "rte":   {"n_epochs": 20, "max_len": 128}
+    }
+    return output_modes[task_name], default_params[task_name]["n_epochs"], default_params[task_name]["max_len"]
 
 
 class QuantizedDistillElectraTrainer(train.Trainer):
-    def __init__(self, writer, *args, **kwargs):
+    def __init__(self, task_name, output_mode, num_labels, writer, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.task_name = task_name
+        self.output_mode = output_mode
+        self.num_labels = num_labels
         self.writer = writer
         self.bceLoss = nn.BCELoss()
         self.mseLoss = nn.MSELoss()
+        self.ceLoss = nn.CrossEntropyLoss()
 
     def get_loss(self, model, batch, global_step, train_cfg, model_cfg): # make sure loss is tensor
         t_outputs, s_outputs, s2t_hidden_states = model(*batch)
@@ -346,86 +416,48 @@ class QuantizedDistillElectraTrainer(train.Trainer):
         return total_loss
 
     def evaluate(self, model, batch):
-        input_ids, attention_mask, token_type_ids, label_id = batch
-        logits = model(input_ids, token_type_ids, attention_mask)
-        _, label_pred = logits.max(1)
-        result = (label_pred == label_id).float()  # .cpu().numpy()
-        accuracy = result.mean()
-        return accuracy, result
+        _, _, _, label_ids = batch
+        _, s_outputs, _ = model(*batch)
+        if self.output_mode == "classification":
+            loss = self.ceLoss(s_outputs.logits.view(-1, self.num_labels), label_ids).mean().item()
+            preds = np.argmax(s_outputs.logits.detach().cpu().numpy(), axis=1)
+        elif self.output_mode == "regression":
+            loss = self.mseLoss(s_outputs.logits.view(-1), label_ids).mean().item()
+            preds = np.squeeze(s_outputs.logits.detach().cpu().numpy())
+        else:
+            raise KeyError(self.output_mode)
+        result = compute_metrics(self.task_name, preds, label_ids.numpy())
+        result['loss'] = loss
+        return result
 
 
-def main(task='mrpc',
+def main(task_name='mrpc',
+         base_train_cfg='config/QDElectra_pretrain.json',
          train_cfg='config/train_mrpc.json',
-         model_cfg='config/QDElectra_pretrain.json',
+         model_cfg='config/QDElectra_base.json',
          data_file='../glue/MRPC/train.tsv',
          model_file=None,
          data_parallel=True,
          vocab='../uncased_L-12_H-768_A-12/vocab.txt',
          log_dir='../exp/electra/pretrain/runs',
          save_dir='../exp/bert/mrpc',
-         max_len=128,
          mode='train',
          pred_distill=True):
 
-    processors = {
-        "cola":    COLA,
-        "mnli":    MNLI,
-        "mrpc":    MRPC,
-        "sst-2":   SST2,
-        "sts-b":   STSB,
-        "qqp":     QQP,
-        "qnli":    QNLI,
-        "rte":     RTE,
-        "wnli":    WNLI
-    }
-
-    output_modes = {
-        "cola":  "classification",
-        "mnli":  "classification",
-        "mrpc":  "classification",
-        "sst-2": "classification",
-        "sts-b": "regression",
-        "qqp":   "classification",
-        "qnli":  "classification",
-        "rte":   "classification",
-        "wnli":  "classification"
-    }
-
-    # intermediate distillation default parameters
-    default_params = {
-        "cola":  {"num_train_epochs": 50, "max_len": 64},
-        "mnli":  {"num_train_epochs": 5,  "max_len": 128},
-        "mrpc":  {"num_train_epochs": 20, "max_len": 128},
-        "sst-2": {"num_train_epochs": 10, "max_len": 64},
-        "sts-b": {"num_train_epochs": 20, "max_len": 128},
-        "qqp":   {"num_train_epochs": 5,  "max_len": 128},
-        "qnli":  {"num_train_epochs": 10, "max_len": 128},
-        "rte":   {"num_train_epochs": 20, "max_len": 128}
-    }
-
-    # acc_tasks = ["mnli", "mrpc", "sst-2", "qqp", "qnli", "rte"]
-    # corr_tasks = ["sts-b"]
-    # mcc_tasks = ["cola"]
-
-    if task in default_params:
-        max_len = default_params [task]["max_len"]
-
-    if task not in processors:
-        raise ValueError("Task not found: %s" % task)
-
-    processor = processors[task]
-    output_mode = output_modes[task]
-
-    train_cfg = QuantizedDistillElectraTrainConfig.from_json(train_cfg)
+    train_cfg_dict = json.load(open(base_train_cfg, "r"))
+    train_cfg_dict.update(json.load(open(train_cfg, "r")))
+    train_cfg = ElectraConfig().from_dict(train_cfg_dict)
     model_cfg = ElectraConfig().from_json_file(model_cfg)
+    output_mode, train_cfg.n_epochs, max_len = get_task_params(task_name)
+
     set_seeds(train_cfg.seed)
 
     tokenizer = tokenization.FullTokenizer(vocab_file=vocab, do_lower_case=True)
-    TaskDataset = dataset_class(task) # task dataset class according to the task
+    TaskDataset = dataset_class(task_name) # task dataset class according to the task name
     pipeline = [
         Tokenizing(tokenizer.convert_to_unicode, tokenizer.tokenize),
         AddSpecialTokensWithTruncation(max_len),
-        TokenIndexing(tokenizer.convert_tokens_to_ids, TaskDataset.labels, max_len)
+        TokenIndexing(tokenizer.convert_tokens_to_ids, TaskDataset.labels, output_mode, max_len)
     ]
     data_set = TaskDataset(data_file, pipeline)
     data_iter = DataLoader(data_set, batch_size=train_cfg.batch_size, shuffle=True)
@@ -442,14 +474,14 @@ def main(task='mrpc',
     writer = SummaryWriter(log_dir=log_dir) # for tensorboardX
 
     base_trainer_args = (train_cfg, model_cfg, model, data_iter, optimizer, save_dir, get_device())
-    trainer = QuantizedDistillElectraTrainer(writer, *base_trainer_args)
+    trainer = QuantizedDistillElectraTrainer(
+        task_name, output_mode, len(TaskDataset.labels), writer, *base_trainer_args
+    )
 
     if mode == 'train':
         trainer.train(model_file, None, data_parallel)
     elif mode == 'eval':
-        results = trainer.eval(model_file, data_parallel)
-        total_accuracy = torch.cat(results).mean().item()
-        print('Accuracy:', total_accuracy)
+        trainer.eval(model_file, data_parallel)
 
 
 if __name__ == '__main__':

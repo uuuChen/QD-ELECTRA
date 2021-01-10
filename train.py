@@ -4,6 +4,7 @@
 
 import os
 import json
+import numpy as np
 from typing import NamedTuple
 from tqdm import tqdm
 from abc import abstractmethod
@@ -69,17 +70,20 @@ class Trainer(object):
         model = self.model.to(self.device)
         if data_parallel: # use Data Parallelism with Multi-GPU
             model = nn.DataParallel(model)
-
-        results = [] # prediction results
-        iter_bar = tqdm(self.data_iter, desc='Iter (loss=X.XXX)')
+        iter_bar = tqdm(self.data_iter, desc='Iter')
+        global_step = 0
+        result_values_sum = None
         for batch in iter_bar:
             batch = [t.to(self.device) for t in batch]
             with torch.no_grad(): # evaluation without gradient calculation
-                accuracy, result = self.evaluate(model, batch) # accuracy to print
-            results.append(result)
-
-            iter_bar.set_description('Iter(acc=%5.3f)' % accuracy)
-        return results
+                result_dict = self.evaluate(model, batch) # accuracy to print
+                result_values = np.array(list(result_dict.values()))
+            global_step += 1
+            if result_values_sum is None:
+                result_values_sum = [0] * len(result_values)
+            result_values_sum += result_values
+            iter_bar.set_description('Iter')
+            print(dict(zip(result_dict.keys(), result_values_sum / global_step)))
 
     def load(self, model_file, pretrain_file):
         """ load saved model or pretrained transformer (a part of model) """
@@ -92,17 +96,15 @@ class Trainer(object):
             if pretrain_file.endswith('.ckpt'): # checkpoint file in tensorflow
                 checkpoint.load_model(self.model.transformer, pretrain_file)
             elif pretrain_file.endswith('.pt'): # pretrain model file in pytorch
-                self.model.transformer.load_state_dict(
-                    {key[12:]: value
-                        for key, value in torch.load(pretrain_file).items()
-                        if key.startswith('transformer')}
-                ) # load only transformer parts
+                self.model.transformer.load_state_dict({
+                    key[12:]: value for key, value in torch.load(pretrain_file).items()
+                    if key.startswith('transformer')
+                }) # load only transformer parts
 
     def save(self, i):
         """ save current model """
         os.makedirs(self.save_dir, exist_ok=True)
-        torch.save(self.model.state_dict(), # save model object before nn.DataParallel
-            os.path.join(self.save_dir, 'model_steps_' + str(i) + '.pt'))
+        torch.save(self.model.state_dict(), os.path.join(self.save_dir, 'model_steps_' + str(i) + '.pt'))
 
     @abstractmethod
     def get_loss(self, model, batch, global_step, train_cfg, model_cfg):

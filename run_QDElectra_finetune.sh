@@ -7,5 +7,4 @@ python classify.py \
         --data_file 'data/msr_paraphrase_train.txt' \
         --vocab 'data/vocab.txt' \
         --save_dir 'test_save' \
-        --max_len 128 \
         --pred_distill True

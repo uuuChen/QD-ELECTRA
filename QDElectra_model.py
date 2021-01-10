@@ -351,6 +351,13 @@ class QuantizedLinear(QuantizedLayer, nn.Linear):
             ema -= (1 - self.ema_decay) * (ema - reduce_fn(input))
         return ema
 
+    def _eval(self):
+        if self.input_ema_thresh == 0:
+            self.input_ema_thresh = self.weight.abs().max()
+        if self.output_ema_thresh == 0:
+            self.output_ema_thresh = self.weight.abs().max()
+        super()._eval()
+
 
 class QuantizedEmbedding(QuantizedLayer, nn.Embedding):
     def __init__(self, *args, **kwargs):

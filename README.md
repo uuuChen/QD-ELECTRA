@@ -18,7 +18,7 @@ This contains 9 python files.
 - [`checkpoint.py`](./checkpoint.py) : Functions to load a model from tensorflow's checkpoint file
 - [`models.py`](bert_model.py) : Model classes for a general transformer
 - [`optim.py`](./optim.py) : A custom optimizer (BertAdam class) adopted from Hugging Face's code
-- [`train.py`](./train.py) : A helper class for training and evaluation
+- [`train.py`](train_2.py) : A helper class for training and evaluation
 - [`utils.py`](./utils.py) : Several utility functions
 - [`pretrain.py`](bert_pretrain.py) : An example code for pre-training transformer
 - [`classify.py`](./classify.py) : An example code for fine-tuning using pre-trained transformer
