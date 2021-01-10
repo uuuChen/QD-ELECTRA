@@ -21,7 +21,11 @@ from transformers import (
     ElectraForMultipleChoice,
     ElectraForSequenceClassification
 )
-from QDElectra_model import DistillElectraForSequenceClassification
+
+from QDElectra_model import (
+    DistillElectraForSequenceClassification,
+    QuantizedElectraForSequenceClassification
+)
 from typing import NamedTuple
 import tokenization
 import optim
@@ -423,16 +427,18 @@ def main(task='mrpc',
         AddSpecialTokensWithTruncation(max_len),
         TokenIndexing(tokenizer.convert_tokens_to_ids, TaskDataset.labels, max_len)
     ]
-    dataset = TaskDataset(data_file, pipeline)
-    data_iter = DataLoader(dataset, batch_size=train_cfg.batch_size, shuffle=True)
+    data_set = TaskDataset(data_file, pipeline)
+    data_iter = DataLoader(data_set, batch_size=train_cfg.batch_size, shuffle=True)
 
-    t_discriminator = ElectraForSequenceClassification.from_pretrained('google/electra-base-discriminator')
-    s_discriminator = ElectraForSequenceClassification.from_pretrained(
+    t_discriminator = ElectraForSequenceClassification.from_pretrained(
+        'google/electra-base-discriminator'
+    )
+    s_discriminator = QuantizedElectraForSequenceClassification.from_pretrained(
         'google/electra-small-discriminator', config=model_cfg
     )
     model = DistillElectraForSequenceClassification(t_discriminator, s_discriminator, model_cfg)
 
-    optimizer = optim.optim4GPU(train_cfg,model)
+    optimizer = optim.optim4GPU(train_cfg, model)
     writer = SummaryWriter(log_dir=log_dir) # for tensorboardX
 
     base_trainer_args = (train_cfg, model_cfg, model, data_iter, optimizer, save_dir, get_device())
@@ -440,7 +446,6 @@ def main(task='mrpc',
 
     if mode == 'train':
         trainer.train(model_file, None, data_parallel)
-
     elif mode == 'eval':
         results = trainer.eval(model_file, data_parallel)
         total_accuracy = torch.cat(results).mean().item()

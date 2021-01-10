@@ -17,6 +17,7 @@ from transformers.models.electra.modeling_electra import (
     ElectraForPreTraining,
     ElectraDiscriminatorPredictions,
     ElectraForSequenceClassification,
+    ElectraClassificationHead,
     ElectraModel,
     ElectraConfig,
     ElectraEmbeddings,
@@ -505,6 +506,24 @@ class QuantizedElectraForPreTraining(ElectraForPreTraining):
         super().__init__(config)
         self.electra = QuantizedElectraModel(config)
         self.discriminator_predictions = QuantizedElectraDiscriminatorPredictions(config)
+
+
+class QuantizedElectraClassificationHead(ElectraClassificationHead):
+    def __init__(self, config):
+        super().__init__(config)
+        self.dense = quantized_linear_setup(
+            config, config.hidden_size, config.hidden_size
+        )
+        self.out_proj = quantized_linear_setup(
+            config, config.hidden_size, config.num_labels
+        )
+
+
+class QuantizedElectraForSequenceClassification(ElectraForSequenceClassification):
+    def __init__(self, config):
+        super().__init__(config)
+        self.electra = QuantizedElectraModel(config)
+        self.classifier = QuantizedElectraClassificationHead(config)
 
 
 # Completely same with original torch.nn.LayerNorm code
