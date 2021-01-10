@@ -16,6 +16,7 @@ import torch.nn.functional as F
 from transformers.models.electra.modeling_electra import (
     ElectraForPreTraining,
     ElectraDiscriminatorPredictions,
+    ElectraForSequenceClassification,
     ElectraModel,
     ElectraConfig,
     ElectraEmbeddings,
@@ -71,6 +72,7 @@ class DistillElectraForPreTraining(nn.Module):
     def __init__(self, generator, t_discriminator, s_discriminator, config):
         super().__init__()
         self.generator = generator
+        self.config = config
         self.t_discriminator = t_discriminator
         self.s_discriminator = s_discriminator
 
@@ -121,6 +123,43 @@ class DistillElectraForPreTraining(nn.Module):
             s2t_hidden_states.append(self.fit_hidden_dense(hidden_state))
 
         return g_outputs, t_d_outputs, s_d_outputs, s2t_hidden_states
+
+
+class DistillElectraForSequenceClassification(nn.Module):
+    """ Classifier with Transformer """
+    def __init__(self, t_discriminator, s_discriminator, config):
+        super().__init__()
+        self.t_discriminator = t_discriminator
+        self.s_discriminator = s_discriminator
+
+        self.fit_hidden_dense = nn.Linear(config.s_hidden_size, config.t_hidden_size)
+
+    def forward(self, input_ids, attention_mask, token_type_ids, labels):
+        t_outputs = self.t_discriminator(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            labels=labels,
+            output_attentions=True,
+            output_hidden_states=True,
+            return_dict=True,
+        )
+        s_outputs = self.s_discriminator(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            labels=labels,
+            output_attentions=True,
+            output_hidden_states=True,
+            return_dict=True,
+        )
+
+        # Map student hidden states to teacher hidden states and return
+        s2t_hidden_states = list()
+        for i, hidden_state in enumerate(s_outputs.hidden_states):
+            s2t_hidden_states.append(self.fit_hidden_dense(hidden_state))
+
+        return t_outputs, s_outputs, s2t_hidden_states
 
 
 # -----------------------
@@ -482,7 +521,7 @@ class QuantizedDropout(nn.Dropout):
 
 if __name__ == '__main__':
     model_cfg = ElectraConfig().from_json_file('config/QDElectra_base.json')
-    s_discriminator = QuantizedElectraForPreTraining(model_cfg).from_pretrained(
-        'google/electra-small-discriminator', config=model_cfg
-    )
-    print(s_discriminator)
+    # s_discriminator = QuantizedElectraForPreTraining(model_cfg).from_pretrained(
+    #     'google/electra-small-discriminator', config=model_cfg
+    # )
+    # print(s_discriminator)
