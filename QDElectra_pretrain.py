@@ -169,12 +169,12 @@ class QuantizedDistillElectraTrainer(train.Trainer):
         self.bceLoss = nn.BCELoss()
         self.mseLoss = nn.MSELoss()
 
-    def get_loss(self, model, batch, global_step, train_cfg, model_cfg):
+    def get_loss(self, model, batch, global_step):
         g_outputs, t_d_outputs, s_d_outputs, s2t_hidden_states = model(*batch)
 
         # Get original electra loss
-        t_d_outputs.loss *= train_cfg.lambda_
-        s_d_outputs.loss *= train_cfg.lambda_
+        t_d_outputs.loss *= self.train_cfg.lambda_
+        s_d_outputs.loss *= self.train_cfg.lambda_
         electra_loss = g_outputs.loss + s_d_outputs.loss + t_d_outputs.loss
 
         # -----------------------
@@ -187,9 +187,9 @@ class QuantizedDistillElectraTrainer(train.Trainer):
         #       3-2. Teacher head numbers are divisible by Student head numbers
         # -----------------------
         soft_logits_loss = self.bceLoss(
-            F.sigmoid(s_d_outputs.logits / train_cfg.temperature),
-            F.sigmoid(t_d_outputs.logits.detach() / train_cfg.temperature),
-        ) * train_cfg.temperature * train_cfg.temperature
+            F.sigmoid(s_d_outputs.logits / self.train_cfg.temperature),
+            F.sigmoid(t_d_outputs.logits.detach() / self.train_cfg.temperature),
+        ) * self.train_cfg.temperature * self.train_cfg.temperature
 
         hidden_layers_loss = 0
         for t_hidden, s_hidden in zip(t_d_outputs.hidden_states, s2t_hidden_states):
@@ -200,7 +200,7 @@ class QuantizedDistillElectraTrainer(train.Trainer):
         # student attention shape per layer : (batch_size, s_n_heads, max_seq_len, max_seq_len)
         # -----------------------
         atten_layers_loss = 0
-        split_sections = [model_cfg.s_n_heads] * (model_cfg.t_n_heads // model_cfg.s_n_heads)
+        split_sections = [self.model_cfg.s_n_heads] * (self.model_cfg.t_n_heads // self.model_cfg.s_n_heads)
         for t_atten, s_atten in zip(t_d_outputs.attentions, s_d_outputs.attentions):
             split_t_attens = torch.split(t_atten.detach(), split_sections, dim=1)
             for i, split_t_atten in enumerate(split_t_attens):
@@ -245,7 +245,7 @@ class QuantizedDistillElectraTrainer(train.Trainer):
             global_step += 1
             batch = [t.to(self.device) for t in batch]
             with torch.no_grad():  # evaluation without gradient calculation
-                loss = self.get_loss(model, batch, global_step, self.train_cfg, self.model_cfg).mean()  # mean() for Data
+                loss = self.get_loss(model, batch, global_step).mean()  # mean() for Data
             results.append(loss)
 
             iter_bar.set_description('Iter(loss=%5.3f)' % loss)

@@ -168,7 +168,7 @@ class ElectraTrainer(train.Trainer):
         self.bceLoss = nn.BCELoss()
         self.mseLoss = nn.MSELoss()
 
-    def get_loss(self, model, batch, global_step, train_cfg, model_cfg): # make sure loss is tensor
+    def get_loss(self, model, batch, global_step): # make sure loss is tensor
         g_outputs, d_outputs = model(*batch)
 
         # Get original electra loss

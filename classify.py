@@ -357,11 +357,11 @@ class QuantizedDistillElectraTrainer(train.Trainer):
         self.mseLoss = nn.MSELoss()
         self.ceLoss = nn.CrossEntropyLoss()
 
-    def get_loss(self, model, batch, global_step, train_cfg, model_cfg): # make sure loss is tensor
+    def get_loss(self, model, batch, global_step): # make sure loss is tensor
         t_outputs, s_outputs, s2t_hidden_states = model(*batch)
 
-        t_outputs.loss *= train_cfg.lambda_
-        s_outputs.loss *= train_cfg.lambda_
+        t_outputs.loss *= self.train_cfg.lambda_
+        s_outputs.loss *= self.train_cfg.lambda_
 
         # -----------------------
         # Get distillation loss
@@ -373,9 +373,9 @@ class QuantizedDistillElectraTrainer(train.Trainer):
         #       3-2. Teacher head numbers are divisible by Student head numbers
         # -----------------------
         soft_logits_loss = self.bceLoss(
-            F.sigmoid(s_outputs.logits / train_cfg.temperature),
-            F.sigmoid(t_outputs.logits.detach() / train_cfg.temperature),
-        ) * train_cfg.temperature * train_cfg.temperature
+            F.sigmoid(s_outputs.logits / self.train_cfg.temperature),
+            F.sigmoid(t_outputs.logits.detach() / self.train_cfg.temperature),
+        ) * self.train_cfg.temperature * self.train_cfg.temperature
 
         hidden_layers_loss = 0
         for t_hidden, s_hidden in zip(t_outputs.hidden_states, s2t_hidden_states):
@@ -386,7 +386,7 @@ class QuantizedDistillElectraTrainer(train.Trainer):
         # student attention shape per layer : (batch_size, s_n_heads, max_seq_len, max_seq_len)
         # -----------------------
         atten_layers_loss = 0
-        split_sections = [model_cfg.s_n_heads] * (model_cfg.t_n_heads // model_cfg.s_n_heads)
+        split_sections = [self.model_cfg.s_n_heads] * (self.model_cfg.t_n_heads // self.model_cfg.s_n_heads)
         for t_atten, s_atten in zip(t_outputs.attentions, s_outputs.attentions):
             split_t_attens = torch.split(t_atten.detach(), split_sections, dim=1)
             for i, split_t_atten in enumerate(split_t_attens):
@@ -469,6 +469,7 @@ def main(task_name='mrpc',
         'google/electra-small-discriminator', config=model_cfg
     )
     model = DistillElectraForSequenceClassification(t_discriminator, s_discriminator, model_cfg)
+    # model.load_state_dict(torch.load('saved_QDElectra/model_steps_90000.pt'))
 
     optimizer = optim.optim4GPU(train_cfg, model)
     writer = SummaryWriter(log_dir=log_dir) # for tensorboardX

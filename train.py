@@ -42,7 +42,7 @@ class Trainer(object):
                 batch = [t.to(self.device) for t in batch]
 
                 self.optimizer.zero_grad()
-                loss = self.get_loss(model, batch, global_step, self.train_cfg, self.model_cfg).mean() # mean() for Data
+                loss = self.get_loss(model, batch, global_step).mean() # mean() for Data
                 # Parallelism
                 loss.backward()
                 self.optimizer.step()
@@ -107,7 +107,7 @@ class Trainer(object):
         torch.save(self.model.state_dict(), os.path.join(self.save_dir, 'model_steps_' + str(i) + '.pt'))
 
     @abstractmethod
-    def get_loss(self, model, batch, global_step, train_cfg, model_cfg):
+    def get_loss(self, model, batch, global_step):
         return NotImplementedError
 
     @abstractmethod
