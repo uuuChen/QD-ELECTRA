@@ -172,7 +172,7 @@ class ElectraTrainer(train.Trainer):
         g_outputs, d_outputs = model(*batch)
 
         # Get original electra loss
-        d_outputs.loss *= train_cfg.lambda_
+        d_outputs.loss *= self.train_cfg.lambda_
         total_loss = g_outputs.loss + d_outputs.loss
 
         self.writer.add_scalars(
