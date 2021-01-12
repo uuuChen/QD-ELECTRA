@@ -31,24 +31,6 @@ from utils import set_seeds, get_device, truncate_tokens_pair
 #    so that the "next sentence prediction" task doesn't span between documents.
 
 
-class ElectraTrainConfig(NamedTuple):
-    """ Hyperparameters for training """
-    seed: int = 3431 # random seed
-    batch_size: int = 32
-    lr: int = 5e-5 # learning rate
-    n_epochs: int = 10 # the number of epoch
-    # `warm up` period = warmup(0.1)*total_steps
-    # linearly increasing learning rate from zero to the specified value(5e-5)
-    warmup: float = 0.1
-    save_steps: int = 100 # interval for saving model
-    total_steps: int = 100000 # total number of steps to train
-    lambda_: int = 50 # lambda for electra discriminator loss
-
-    @classmethod
-    def from_json(cls, file): # load config from json file
-        return cls(**json.load(open(file, "r")))
-
-
 class SentPairDataLoader():
     """ Load sentence pair (sequential or random order) from corpus """
     def __init__(self, file, batch_size, tokenize, max_len, short_sampling_prob=0.1, pipeline=[]):
@@ -172,6 +154,8 @@ class ElectraTrainer(train.Trainer):
         g_outputs, d_outputs = model(*batch)
 
         # Get original electra loss
+        g_outputs.loss = g_outputs.loss.mean()
+        d_outputs.loss = d_outputs.loss.mean()
         d_outputs.loss *= self.train_cfg.lambda_
         total_loss = g_outputs.loss + d_outputs.loss
 
@@ -202,7 +186,7 @@ def main(train_cfg='config/electra_pretrain.json',
          max_pred=20,
          mask_prob=0.15):
 
-    train_cfg = ElectraTrainConfig.from_json(train_cfg)
+    train_cfg = ElectraConfig().from_json_file(train_cfg)
     model_cfg = ElectraConfig().from_json_file(model_cfg)
 
     set_seeds(train_cfg.seed)

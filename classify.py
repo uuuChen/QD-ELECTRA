@@ -360,6 +360,8 @@ class QuantizedDistillElectraTrainer(train.Trainer):
     def get_loss(self, model, batch, global_step): # make sure loss is tensor
         t_outputs, s_outputs, s2t_hidden_states = model(*batch)
 
+        t_outputs.loss = t_outputs.loss.mean()
+        s_outputs.loss = s_outputs.loss.mean()
         t_outputs.loss *= self.train_cfg.lambda_
         s_outputs.loss *= self.train_cfg.lambda_
 
