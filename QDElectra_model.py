@@ -61,6 +61,7 @@ class Electra(nn.Module):
         d_labels = (original_input_ids != g_outputs_ids)
         d_outputs = self.discriminator(
             g_outputs_ids,
+            attention_mask=original_attention_mask,
             labels=d_labels,
             output_attentions=True,
             output_hidden_states=True
