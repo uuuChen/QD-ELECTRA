@@ -1,5 +1,5 @@
-# Copyright 2018 Dong-Hyun Lee, Kakao Brain.
-# (Strongly inspired by original Google BERT code and Hugging Face's code)
+# Copyright 2021 Chen-Fa-You, Tseng-Chih-Ying, NTHU
+# (Strongly inspired by Intel TinyBert's code and Dong-Hyun Lee's code)
 
 """ Fine-tuning on A Classification Task with pretrained Transformer """
 
