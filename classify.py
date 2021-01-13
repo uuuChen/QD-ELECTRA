@@ -141,7 +141,7 @@ class QQP(CsvDataset):
 
 class QNLI(CsvDataset):
     """Dataset class for QNLI"""
-    labels = ("0", "1")
+    labels = ("entailment", "not_entailment")
 
     def __init__(self, file, pipeline=[]):
         super().__init__(file, pipeline)
@@ -202,17 +202,21 @@ class Pipeline():
 
 class Tokenizing(Pipeline):
     """ Tokenizing sentence pair """
-    def __init__(self, preprocessor, tokenize):
+    def __init__(self, task_name, preprocessor, tokenize):
         super().__init__()
         self.preprocessor = preprocessor # e.g. text normalization
         self.tokenize = tokenize # tokenize function
+        self.task_name = task_name
 
     def __call__(self, instance):
-        label, text_a, text_b = instance
-
+        if self.task_name == ("cola" or "sst-2"):
+            label, text_a = instance
+            text_b = []
+        else:
+            label, text_a, text_b = instance
         label = self.preprocessor(label)
         tokens_a = self.tokenize(self.preprocessor(text_a))
-        tokens_b = self.tokenize(self.preprocessor(text_b)) if text_b else []
+        tokens_b = self.tokenize(self.preprocessor(text_b)) if text_b != [] else []
 
         return label, tokens_a, tokens_b
 
@@ -347,12 +351,15 @@ def get_task_params(task_name):
 
 
 class QuantizedDistillElectraTrainer(train.Trainer):
-    def __init__(self, task_name, output_mode, num_labels, writer, *args, **kwargs):
+    def __init__(self, task_name, output_mode, pred_distill, imitate_tinybert, num_labels, writer, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.task_name = task_name
         self.output_mode = output_mode
+        self.pred_distill = pred_distill
+        self.imitate_tinybert = imitate_tinybert
         self.num_labels = num_labels
         self.writer = writer
+
         self.bceLoss = nn.BCELoss()
         self.mseLoss = nn.MSELoss()
         self.ceLoss = nn.CrossEntropyLoss()
@@ -360,8 +367,6 @@ class QuantizedDistillElectraTrainer(train.Trainer):
     def get_loss(self, model, batch, global_step): # make sure loss is tensor
         t_outputs, s_outputs, s2t_hidden_states = model(*batch)
 
-        t_outputs.loss = t_outputs.loss.mean()
-        s_outputs.loss = s_outputs.loss.mean()
         t_outputs.loss *= self.train_cfg.lambda_
         s_outputs.loss *= self.train_cfg.lambda_
 
@@ -394,7 +399,18 @@ class QuantizedDistillElectraTrainer(train.Trainer):
             for i, split_t_atten in enumerate(split_t_attens):
                 atten_layers_loss += self.mseLoss(s_atten[:, i, :, :], torch.mean(split_t_atten, dim=1))
 
-        total_loss = s_outputs.loss + t_outputs.loss + soft_logits_loss + hidden_layers_loss + atten_layers_loss
+        if self.imitate_tinybert:
+            if not pred_distill:
+                total_loss =  hidden_layers_loss + atten_layers_loss
+            else:
+                if self.output_mode == "regression":
+                    total_loss = s_outputs.loss
+                elif self.output_mode == "classification":
+                    total_loss = soft_logits_loss
+                else:
+                    raise Keyerror(self.output_mode)
+        else:
+            total_loss = t_outputs.loss + s_outputs.loss + soft_logits_loss + hidden_layers_loss + atten_layers_loss
 
         self.writer.add_scalars(
             'data/scalar_group', {
@@ -433,18 +449,19 @@ class QuantizedDistillElectraTrainer(train.Trainer):
         return result
 
 
-def main(task_name='mrpc',
+def main(task_name='qqp',
          base_train_cfg='config/QDElectra_pretrain.json',
          train_cfg='config/train_mrpc.json',
          model_cfg='config/QDElectra_base.json',
-         data_file='../glue/MRPC/train.tsv',
+         data_file='GLUE/glue_data/QQP/train.tsv',
          model_file=None,
          data_parallel=True,
          vocab='../uncased_L-12_H-768_A-12/vocab.txt',
          log_dir='../exp/electra/pretrain/runs',
          save_dir='../exp/bert/mrpc',
          mode='train',
-         pred_distill=True):
+         pred_distill=True,
+         imitate_tinybert=False):
 
     train_cfg_dict = json.load(open(base_train_cfg, "r"))
     train_cfg_dict.update(json.load(open(train_cfg, "r")))
@@ -457,28 +474,44 @@ def main(task_name='mrpc',
     tokenizer = tokenization.FullTokenizer(vocab_file=vocab, do_lower_case=True)
     TaskDataset = dataset_class(task_name) # task dataset class according to the task name
     pipeline = [
-        Tokenizing(tokenizer.convert_to_unicode, tokenizer.tokenize),
+        Tokenizing(task_name, tokenizer.convert_to_unicode, tokenizer.tokenize),
         AddSpecialTokensWithTruncation(max_len),
         TokenIndexing(tokenizer.convert_tokens_to_ids, TaskDataset.labels, output_mode, max_len)
     ]
     data_set = TaskDataset(data_file, pipeline)
     data_iter = DataLoader(data_set, batch_size=train_cfg.batch_size, shuffle=True)
 
+    generator = ElectraForSequenceClassification.from_pretrained(
+        'google/electra-small-generator'
+    )
     t_discriminator = ElectraForSequenceClassification.from_pretrained(
         'google/electra-base-discriminator'
     )
-    s_discriminator = QuantizedElectraForSequenceClassification.from_pretrained(
+    s_discriminator = ElectraForSequenceClassification.from_pretrained(
         'google/electra-small-discriminator', config=model_cfg
     )
-    model = DistillElectraForSequenceClassification(t_discriminator, s_discriminator, model_cfg)
-    # model.load_state_dict(torch.load('saved_QDElectra/model_steps_90000.pt'))
+
+    # model = DistillElectraForSequenceClassification(generator, t_discriminator, s_discriminator, model_cfg)
+    # model.load_state_dict(torch.load('./saved_QDElectra/model_steps_90000.pt'), strict=False)
+    # model.t_discriminator.save_pretrained("load_model/teacher/")
+    # model.s_discriminator.save_pretrained("load_model/student/")
+    # teacher_config = ElectraConfig().from_json_file("load_model/teacher/config.json")
+    # student_config = ElectraConfig().from_json_file("load_model/student/config.json")
+    # t_discriminator = ElectraForSequenceClassification.from_pretrained(
+    #     'load_model/teacher/pytorch_model.bin', config=teacher_config
+    # )
+    # s_discriminator = QuantizedElectraForSequenceClassification.from_pretrained(
+    #     'load_model/student/pytorch_model.bin', config=student_config
+    # )
+
+    model = DistillElectraForSequenceClassification(generator, t_discriminator, s_discriminator, model_cfg)
 
     optimizer = optim.optim4GPU(train_cfg, model)
     writer = SummaryWriter(log_dir=log_dir) # for tensorboardX
 
     base_trainer_args = (train_cfg, model_cfg, model, data_iter, optimizer, save_dir, get_device())
     trainer = QuantizedDistillElectraTrainer(
-        task_name, output_mode, len(TaskDataset.labels), writer, *base_trainer_args
+        task_name, output_mode, pred_distill, imitate_tinybert, len(TaskDataset.labels), writer, *base_trainer_args
     )
 
     if mode == 'train':

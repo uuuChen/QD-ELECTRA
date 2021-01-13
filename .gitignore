@@ -3,6 +3,7 @@ settings.json
 saved*/
 logs*/
 .DS_Store
+load_model/
 .ipynb_checkpoints
 *checkpoint.ipynb
 __pycache__

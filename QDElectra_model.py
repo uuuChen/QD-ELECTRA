@@ -14,6 +14,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers.models.electra.modeling_electra import (
+    ElectraPreTrainedModel,
     ElectraForPreTraining,
     ElectraDiscriminatorPredictions,
     ElectraForSequenceClassification,
@@ -28,6 +29,7 @@ from transformers.models.electra.modeling_electra import (
     ElectraOutput,
     ElectraSelfAttention,
     ElectraSelfOutput,
+    ACT2FN
 )
 
 
@@ -127,10 +129,11 @@ class DistillElectraForPreTraining(nn.Module):
         return g_outputs, t_d_outputs, s_d_outputs, s2t_hidden_states
 
 
-class DistillElectraForSequenceClassification(nn.Module):
+class DistillElectraForSequenceClassification(DistillElectraForPreTraining):
     """ Classifier with Transformer """
-    def __init__(self, t_discriminator, s_discriminator, config):
-        super().__init__()
+    def __init__(self, generator, t_discriminator, s_discriminator, config):
+        super().__init__(generator, t_discriminator, s_discriminator, config)
+        self.generator = generator
         self.t_discriminator = t_discriminator
         self.s_discriminator = s_discriminator
 
@@ -144,7 +147,7 @@ class DistillElectraForSequenceClassification(nn.Module):
             labels=labels,
             output_attentions=True,
             output_hidden_states=True,
-            return_dict=True,
+            # return_dict=True,
         )
         s_outputs = self.s_discriminator(
             input_ids,
@@ -153,7 +156,7 @@ class DistillElectraForSequenceClassification(nn.Module):
             labels=labels,
             output_attentions=True,
             output_hidden_states=True,
-            return_dict=True,
+            # return_dict=True,
         )
 
         # Map student hidden states to teacher hidden states and return
@@ -292,45 +295,59 @@ class QuantizedLinear(QuantizedLayer, nn.Linear):
         self.input_ema_thresh = 0
         self.output_ema_thresh = 0
 
+    # def training_quantized_forward(self, input):
+    #     """fake quantized forward, fake quantizes weights and activations,
+    #     learn quantization ranges if quantization mode is EMA.
+    #     This function should only be used while training"""
+    #     # assert self.training, "should only be called when training"
+    #
+    #     if self.mode == QuantizationMode.EMA:
+    #         self.input_ema_thresh = self._update_ema(self.input_ema_thresh, input.detach())
+    #
+    #     input_scale = self._get_activation_scale(input, self.input_ema_thresh)
+    #     weight_scale = self._get_dynamic_scale(self.weight, self.weight_bits)
+    #
+    #     fake_quantized_input = self._fake_quantize(input, input_scale, self.activation_bits)
+    #     fake_quantized_weight = self._fake_quantize(self.weight, weight_scale, self.weight_bits)
+    #
+    #     out = F.linear(fake_quantized_input, fake_quantized_weight, self.bias)
+    #
+    #     if self.requantize_output:
+    #         if self.mode == QuantizationMode.EMA:
+    #             self.output_ema_thresh = self._update_ema(self.output_ema_thresh, out.detach())
+    #         output_scale = self._get_activation_scale(out, self.output_ema_thresh)
+    #         out = self._fake_quantize(out, output_scale, self.activation_bits)
+    #
+    #     return out
+
+    # def inference_quantized_forward(self, input):
+    #     input_scale = self._get_activation_scale(input, self.input_ema_thresh)
+    #     bias_scale = input_scale * self._weight_scale_for_eval
+    #
+    #     quantized_input = self.quantize(input, input_scale, self.activation_bits)
+    #     quantized_bias = self.quantize(self.bias, bias_scale, self.accumulation_bits)
+    #
+    #     out = F.linear(quantized_input, self._quantized_weight_for_eval, quantized_bias)
+    #     out = self.dequantize(out, bias_scale)
+    #
+    #     if self.requantize_output:
+    #         output_scale = self._get_activation_scale(out, self.output_ema_thresh)
+    #         out = self.dequantize(self.quantize(out, output_scale, self.activation_bits), output_scale)
+    #
+    #     return out
+
     def training_quantized_forward(self, input):
         """fake quantized forward, fake quantizes weights and activations,
         learn quantization ranges if quantization mode is EMA.
         This function should only be used while training"""
-        # assert self.training, "should only be called when training"
-
-        if self.mode == QuantizationMode.EMA:
-            self.input_ema_thresh = self._update_ema(self.input_ema_thresh, input.detach())
-
-        input_scale = self._get_activation_scale(input, self.input_ema_thresh)
         weight_scale = self._get_dynamic_scale(self.weight, self.weight_bits)
-
-        fake_quantized_input = self._fake_quantize(input, input_scale, self.activation_bits)
         fake_quantized_weight = self._fake_quantize(self.weight, weight_scale, self.weight_bits)
-
-        out = F.linear(fake_quantized_input, fake_quantized_weight, self.bias)
-
-        if self.requantize_output:
-            if self.mode == QuantizationMode.EMA:
-                self.output_ema_thresh = self._update_ema(self.output_ema_thresh, out.detach())
-            output_scale = self._get_activation_scale(out, self.output_ema_thresh)
-            out = self._fake_quantize(out, output_scale, self.activation_bits)
-
+        out = F.linear(input, fake_quantized_weight, self.bias)
         return out
 
     def inference_quantized_forward(self, input):
-        input_scale = self._get_activation_scale(input, self.input_ema_thresh)
-        bias_scale = input_scale * self._weight_scale_for_eval
-
-        quantized_input = self.quantize(input, input_scale, self.activation_bits)
-        quantized_bias = self.quantize(self.bias, bias_scale, self.accumulation_bits)
-
-        out = F.linear(quantized_input, self._quantized_weight_for_eval, quantized_bias)
-        out = self.dequantize(out, bias_scale)
-
-        if self.requantize_output:
-            output_scale = self._get_activation_scale(out, self.output_ema_thresh)
-            out = self.dequantize(self.quantize(out, output_scale, self.activation_bits), output_scale)
-
+        out = F.linear(input, self._quantized_weight_for_eval, self.bias)
+        out = self.dequantize(out, self._weight_scale_for_eval)
         return out
 
     def _get_activation_scale(self, x, threshold):
@@ -403,7 +420,7 @@ def quantized_embedding_setup(config, *args, **kwargs):
 
 class QuantizedElectraEmbeddings(ElectraEmbeddings):
     def __init__(self, config):
-        super().__init__(config)
+        super(ElectraEmbeddings, self).__init__()
         self.word_embeddings = quantized_embedding_setup(
             config, config.vocab_size, config.embedding_size, padding_idx=config.pad_token_id
         )
@@ -417,10 +434,23 @@ class QuantizedElectraEmbeddings(ElectraEmbeddings):
         self.LayerNorm = QuantizedLayerNorm(config.embedding_size, eps=config.layer_norm_eps)
         self.dropout = QuantizedDropout(config.hidden_dropout_prob)
 
+        self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
+        self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
+
 
 class QuantizedElectraSelfAttention(ElectraSelfAttention):
     def __init__(self, config):
-        super().__init__(config)
+        super(ElectraSelfAttention, self).__init__()
+        if config.hidden_size % config.num_attention_heads != 0 and not hasattr(config, "embedding_size"):
+            raise ValueError(
+                "The hidden size (%d) is not a multiple of the number of attention "
+                "heads (%d)" % (config.hidden_size, config.num_attention_heads)
+            )
+
+        self.num_attention_heads = config.num_attention_heads
+        self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
+        self.all_head_size = self.num_attention_heads * self.attention_head_size
+
         self.query = quantized_linear_setup(
             config, config.hidden_size, self.all_head_size
         )
@@ -431,7 +461,10 @@ class QuantizedElectraSelfAttention(ElectraSelfAttention):
             config, config.hidden_size, self.all_head_size
         )
 
+        self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
+        self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
         if self.position_embedding_type == "relative_key" or self.position_embedding_type == "relative_key_query":
+            self.max_position_embeddings = config.max_position_embeddings
             self.distance_embedding = quantized_embedding_setup(
                 config, 2 * config.max_position_embeddings - 1, self.attention_head_size
             )
@@ -439,38 +472,52 @@ class QuantizedElectraSelfAttention(ElectraSelfAttention):
 
 class QuantizedElectraSelfOutput(ElectraSelfOutput):
     def __init__(self, config):
-        super().__init__(config)
+        super(ElectraSelfOutput, self).__init__()
         self.dense = quantized_linear_setup(
             config, config.hidden_size, config.hidden_size
         )
+        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
 
 class QuantizedElectraAttention(ElectraAttention):
     def __init__(self, config):
-        super().__init__(config)
+        super(ElectraAttention, self).__init__()
         self.self = QuantizedElectraSelfAttention(config)
         self.output = QuantizedElectraSelfOutput(config)
+        self.pruned_heads = set()
 
 
 class QuantizedElectraIntermediate(ElectraIntermediate):
     def __init__(self, config):
-        super().__init__(config)
+        super(ElectraIntermediate, self).__init__()
         self.dense = quantized_linear_setup(
             config, config.hidden_size, config.intermediate_size
         )
+        if isinstance(config.hidden_act, str):
+            self.intermediate_act_fn = ACT2FN[config.hidden_act]
+        else:
+            self.intermediate_act_fn = config.hidden_act
 
 
 class QuantizedElectraOutput(ElectraOutput):
     def __init__(self, config):
-        super().__init__(config)
+        super(ElectraOutput, self).__init__()
         self.dense = quantized_linear_setup(
             config, config.intermediate_size, config.hidden_size
         )
+        self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
 
 class QuantizedElectraLayer(ElectraLayer):
     def __init__(self, config):
-        super().__init__(config)
+        super(ElectraLayer, self).__init__()
+        self.chunk_size_feed_forward = config.chunk_size_feed_forward
+        self.seq_len_dim = 1
+        self.attention = ElectraAttention(config)
+        self.is_decoder = config.is_decoder
+        self.add_cross_attention = config.add_cross_attention
         self.attention = QuantizedElectraAttention(config)
         if self.add_cross_attention:
             assert self.is_decoder, f"{self} should be used as a decoder model if cross attention is added"
@@ -481,13 +528,14 @@ class QuantizedElectraLayer(ElectraLayer):
 
 class QuantizedElectraEncoder(ElectraEncoder):
     def __init__(self, config):
-        super().__init__(config)
+        super(ElectraEncoder, self).__init__()
+        self.config = config
         self.layer = nn.ModuleList([QuantizedElectraLayer(config) for _ in range(config.num_hidden_layers)])
 
 
 class QuantizedElectraModel(ElectraModel):
     def __init__(self, config):
-        super().__init__(config)
+        super(ElectraModel, self).__init__(config)
         self.embeddings = QuantizedElectraEmbeddings(config)
 
         if config.embedding_size != config.hidden_size:
@@ -496,32 +544,36 @@ class QuantizedElectraModel(ElectraModel):
             )
 
         self.encoder = QuantizedElectraEncoder(config)
+        self.config = config
+        self.init_weights()
 
 
 class QuantizedElectraDiscriminatorPredictions(ElectraDiscriminatorPredictions):
     def __init__(self, config):
-        super().__init__(config)
+        super(ElectraDiscriminatorPredictions, self).__init__()
         self.dense = quantized_linear_setup(
             config, config.hidden_size, config.hidden_size
         )
         self.dense_prediction = quantized_linear_setup(
             config, config.hidden_size, 1
         )
+        self.config = config
 
 
 class QuantizedElectraForPreTraining(ElectraForPreTraining):
     def __init__(self, config):
-        super().__init__(config)
+        super(ElectraForPreTraining, self).__init__(config)
         self.electra = QuantizedElectraModel(config)
         self.discriminator_predictions = QuantizedElectraDiscriminatorPredictions(config)
 
 
 class QuantizedElectraClassificationHead(ElectraClassificationHead):
     def __init__(self, config):
-        super().__init__(config)
+        super(ElectraClassificationHead, self).__init__()
         self.dense = quantized_linear_setup(
             config, config.hidden_size, config.hidden_size
         )
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.out_proj = quantized_linear_setup(
             config, config.hidden_size, config.num_labels
         )
@@ -530,8 +582,10 @@ class QuantizedElectraClassificationHead(ElectraClassificationHead):
 class QuantizedElectraForSequenceClassification(ElectraForSequenceClassification):
     def __init__(self, config):
         super().__init__(config)
+        self.num_labels = config.num_labels
         self.electra = QuantizedElectraModel(config)
         self.classifier = QuantizedElectraClassificationHead(config)
+        self.init_weights()
 
 
 # Completely same with original torch.nn.LayerNorm code
@@ -547,7 +601,9 @@ class QuantizedDropout(nn.Dropout):
 
 
 if __name__ == '__main__':
-    model_cfg = ElectraConfig().from_json_file('config/QDElectra_base.json')
+    print(QuantizedElectraForSequenceClassification.mro())
+
+    # model_cfg = ElectraConfig().from_json_file('config/QDElectra_base.json')
     # s_discriminator = QuantizedElectraForPreTraining(model_cfg).from_pretrained(
     #     'google/electra-small-discriminator', config=model_cfg
     # )

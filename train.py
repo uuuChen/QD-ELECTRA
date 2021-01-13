@@ -60,7 +60,7 @@ class Trainer(object):
                     self.save(global_step) # save and finish when global_steps reach total_steps
                     return
 
-            print('Epoch %d/%d : Average Loss %5.3f' % (e+1, self.train_cfg.n_epochs, loss_sum / (i+1)))
+            print('Epoch %d/%d : Average Loss %5.3f' % (e+1, self.train_cfg.n_epochs, loss_sum/(i+1)))
         self.save(global_step)
 
     def eval(self, model_file, data_parallel=True):
@@ -83,7 +83,7 @@ class Trainer(object):
                 result_values_sum = [0] * len(result_values)
             result_values_sum += result_values
             iter_bar.set_description('Iter')
-            print(dict(zip(result_dict.keys(), result_values_sum / global_step)))
+            print(list(zip(result_dict.keys(), result_values_sum/global_step)))
 
     def load(self, model_file, pretrain_file):
         """ load saved model or pretrained transformer (a part of model) """

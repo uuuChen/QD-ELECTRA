@@ -269,7 +269,8 @@ def main(train_cfg='config/electra_pretrain.json',
     generator = ElectraForMaskedLM.from_pretrained('google/electra-small-generator')
     t_discriminator = ElectraForPreTraining.from_pretrained('google/electra-base-discriminator')
     s_discriminator = QuantizedElectraForPreTraining(model_cfg) if quantize else ElectraForPreTraining
-    s_discriminator = s_discriminator.from_pretrained('google/electra-small-discriminator', config=model_cfg)
+    s_discriminator = s_discriminator.from_pretrained('google/electra-small-discriminator', config=model_cfg)  # model
+    # config is used for model "QuantizedElectraForPreTraining"
     model = DistillElectraForPreTraining(generator, t_discriminator, s_discriminator, model_cfg)
 
     optimizer = optim.optim4GPU(train_cfg, model)
