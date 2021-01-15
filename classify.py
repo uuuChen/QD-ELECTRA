@@ -482,7 +482,7 @@ def main(task_name='qqp',
         TokenIndexing(tokenizer.convert_tokens_to_ids, TaskDataset.labels, output_mode, max_len)
     ]
     data_set = TaskDataset(data_file, pipeline)
-    data_iter = DataLoader(data_set, batch_size=train_cfg.batch_size, shuffle=False)
+    data_iter = DataLoader(data_set, batch_size=train_cfg.batch_size, shuffle=True)
 
     # generator = ElectraForSequenceClassification.from_pretrained(
     #     'google/electra-small-generator'

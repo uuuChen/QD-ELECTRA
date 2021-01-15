@@ -147,7 +147,6 @@ class DistillElectraForSequenceClassification(DistillElectraForPreTraining):
             labels=labels,
             output_attentions=True,
             output_hidden_states=True,
-            # return_dict=True,
         )
         s_outputs = self.s_discriminator(
             input_ids,
@@ -156,7 +155,6 @@ class DistillElectraForSequenceClassification(DistillElectraForPreTraining):
             labels=labels,
             output_attentions=True,
             output_hidden_states=True,
-            # return_dict=True,
         )
 
         # Map student hidden states to teacher hidden states and return
@@ -343,9 +341,8 @@ class QuantizedLinear(QuantizedLayer, nn.Linear):
         return out
 
     def inference_quantized_forward(self, input):
-        quantized_input = self.quantize(input, self._weight_scale_for_eval, self.accumulation_bits)
         quantized_bias = self.quantize(self.bias, self._weight_scale_for_eval, self.accumulation_bits)
-        out = F.linear(quantized_input, self._quantized_weight_for_eval, quantized_bias)
+        out = F.linear(input, self._quantized_weight_for_eval, quantized_bias)
         out = self.dequantize(out, self._weight_scale_for_eval)
         return out
 
@@ -580,7 +577,7 @@ class QuantizedElectraClassificationHead(ElectraClassificationHead):
 
 class QuantizedElectraForSequenceClassification(ElectraForSequenceClassification):
     def __init__(self, config):
-        super().__init__(config)
+        super(ElectraForSequenceClassification, self).__init__(config)
         self.num_labels = config.num_labels
         self.electra = QuantizedElectraModel(config)
         self.classifier = QuantizedElectraClassificationHead(config)
