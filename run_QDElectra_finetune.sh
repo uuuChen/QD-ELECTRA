@@ -8,4 +8,5 @@ python classify.py \
         --vocab './data/vocab.txt' \
         --save_dir './saved_QDElectra_tuned/' \
         --pred_distill True \
+        --quantize True \
         --imitate_tinybert False

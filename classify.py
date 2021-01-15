@@ -461,6 +461,7 @@ def main(task_name='qqp',
          save_dir='../exp/bert/mrpc',
          mode='train',
          pred_distill=True,
+         quantize=False,
          imitate_tinybert=False):
 
     train_cfg_dict = json.load(open(base_train_cfg, "r"))
@@ -473,6 +474,7 @@ def main(task_name='qqp',
 
     tokenizer = tokenization.FullTokenizer(vocab_file=vocab, do_lower_case=True)
     TaskDataset = dataset_class(task_name) # task dataset class according to the task name
+    model_cfg.num_labels = len(TaskDataset.labels)
     pipeline = [
         Tokenizing(task_name, tokenizer.convert_to_unicode, tokenizer.tokenize),
         AddSpecialTokensWithTruncation(max_len),
@@ -487,7 +489,8 @@ def main(task_name='qqp',
     t_discriminator = ElectraForSequenceClassification.from_pretrained(
         'google/electra-base-discriminator'
     )
-    s_discriminator = ElectraForSequenceClassification.from_pretrained(
+    s_discriminator = QuantizedElectraForSequenceClassification if quantize else ElectraForSequenceClassification
+    s_discriminator = s_discriminator.from_pretrained(
         'google/electra-small-discriminator', config=model_cfg
     )
 
