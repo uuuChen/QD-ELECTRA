@@ -369,6 +369,8 @@ class QuantizedDistillElectraTrainer(train.Trainer):
 
         t_outputs.loss *= self.train_cfg.lambda_
         s_outputs.loss *= self.train_cfg.lambda_
+        t_outputs.loss = t_outputs.loss.mean()
+        s_outputs.loss = s_outputs.loss.mean()
 
         # -----------------------
         # Get distillation loss
@@ -401,7 +403,7 @@ class QuantizedDistillElectraTrainer(train.Trainer):
 
         if self.imitate_tinybert:
             if not pred_distill:
-                total_loss =  hidden_layers_loss + atten_layers_loss
+                total_loss = hidden_layers_loss + atten_layers_loss
             else:
                 if self.output_mode == "regression":
                     total_loss = s_outputs.loss

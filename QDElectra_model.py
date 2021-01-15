@@ -337,9 +337,6 @@ class QuantizedLinear(QuantizedLayer, nn.Linear):
     #     return out
 
     def training_quantized_forward(self, input):
-        """fake quantized forward, fake quantizes weights and activations,
-        learn quantization ranges if quantization mode is EMA.
-        This function should only be used while training"""
         weight_scale = self._get_dynamic_scale(self.weight, self.weight_bits)
         fake_quantized_weight = self._fake_quantize(self.weight, weight_scale, self.weight_bits)
         out = F.linear(input, fake_quantized_weight, self.bias)
