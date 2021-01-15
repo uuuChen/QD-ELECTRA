@@ -461,7 +461,6 @@ def main(task_name='qqp',
          vocab='../uncased_L-12_H-768_A-12/vocab.txt',
          log_dir='../exp/electra/pretrain/runs',
          save_dir='../exp/bert/mrpc',
-         mode='train',
          pred_distill=True,
          quantize=False,
          imitate_tinybert=False):
@@ -483,31 +482,37 @@ def main(task_name='qqp',
         TokenIndexing(tokenizer.convert_tokens_to_ids, TaskDataset.labels, output_mode, max_len)
     ]
     data_set = TaskDataset(data_file, pipeline)
-    data_iter = DataLoader(data_set, batch_size=train_cfg.batch_size, shuffle=True)
+    data_iter = DataLoader(data_set, batch_size=train_cfg.batch_size, shuffle=False)
 
+    # generator = ElectraForSequenceClassification.from_pretrained(
+    #     'google/electra-small-generator'
+    # )
+    # t_discriminator = ElectraForSequenceClassification.from_pretrained(
+    #     'google/electra-base-discriminator'
+    # )
+    # s_discriminator = QuantizedElectraForSequenceClassification if quantize else ElectraForSequenceClassification
+    # s_discriminator = s_discriminator.from_pretrained(
+    #     'google/electra-small-discriminator', config=model_cfg
+    # )
+    # model = DistillElectraForSequenceClassification(generator, t_discriminator, s_discriminator, model_cfg)
+    # model.load_state_dict(
+    #     torch.load('./saved_QDElectra/model_steps_40000.pt', map_location=get_device()), strict=False
+    # )
+    # model.t_discriminator.save_pretrained("load_model/teacher/")
+    # model.s_discriminator.save_pretrained("load_model/student/")
+    # raise Exception
+    teacher_config = ElectraConfig().from_json_file("load_model/teacher/config.json")
+    student_config = ElectraConfig().from_json_file("load_model/student/config.json")
     generator = ElectraForSequenceClassification.from_pretrained(
         'google/electra-small-generator'
     )
     t_discriminator = ElectraForSequenceClassification.from_pretrained(
-        'google/electra-base-discriminator'
+        'load_model/teacher/pytorch_model.bin', config=teacher_config
     )
     s_discriminator = QuantizedElectraForSequenceClassification if quantize else ElectraForSequenceClassification
     s_discriminator = s_discriminator.from_pretrained(
-        'google/electra-small-discriminator', config=model_cfg
+        'load_model/student/pytorch_model.bin', config=student_config
     )
-
-    # model = DistillElectraForSequenceClassification(generator, t_discriminator, s_discriminator, model_cfg)
-    # model.load_state_dict(torch.load('./saved_QDElectra/model_steps_90000.pt'), strict=False)
-    # model.t_discriminator.save_pretrained("load_model/teacher/")
-    # model.s_discriminator.save_pretrained("load_model/student/")
-    # teacher_config = ElectraConfig().from_json_file("load_model/teacher/config.json")
-    # student_config = ElectraConfig().from_json_file("load_model/student/config.json")
-    # t_discriminator = ElectraForSequenceClassification.from_pretrained(
-    #     'load_model/teacher/pytorch_model.bin', config=teacher_config
-    # )
-    # s_discriminator = QuantizedElectraForSequenceClassification.from_pretrained(
-    #     'load_model/student/pytorch_model.bin', config=student_config
-    # )
 
     model = DistillElectraForSequenceClassification(generator, t_discriminator, s_discriminator, model_cfg)
 
@@ -519,10 +524,8 @@ def main(task_name='qqp',
         task_name, output_mode, pred_distill, imitate_tinybert, len(TaskDataset.labels), writer, *base_trainer_args
     )
 
-    if mode == 'train':
-        trainer.train(model_file, None, data_parallel)
-    elif mode == 'eval':
-        trainer.eval(model_file, data_parallel)
+    trainer.train(model_file, None, data_parallel)
+    trainer.eval(model_file, data_parallel)
 
 
 if __name__ == '__main__':

@@ -343,7 +343,9 @@ class QuantizedLinear(QuantizedLayer, nn.Linear):
         return out
 
     def inference_quantized_forward(self, input):
-        out = F.linear(input, self._quantized_weight_for_eval, self.bias)
+        quantized_input = self.quantize(input, self._weight_scale_for_eval, self.accumulation_bits)
+        quantized_bias = self.quantize(self.bias, self._weight_scale_for_eval, self.accumulation_bits)
+        out = F.linear(quantized_input, self._quantized_weight_for_eval, quantized_bias)
         out = self.dequantize(out, self._weight_scale_for_eval)
         return out
 
