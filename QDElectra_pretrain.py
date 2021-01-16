@@ -276,7 +276,7 @@ def main(train_cfg='config/electra_pretrain.json',
     optimizer = optim.optim4GPU(train_cfg, model)
     writer = SummaryWriter(log_dir=log_dir) # for tensorboardX
 
-    base_trainer_args = (train_cfg, model_cfg, model, data_iter, optimizer, save_dir, get_device())
+    base_trainer_args = (train_cfg, model_cfg, model, data_iter, None, optimizer, save_dir, get_device())
     trainer = QuantizedDistillElectraTrainer(writer, *base_trainer_args)
     trainer.train(model_file, None, data_parallel)
     trainer._eval()

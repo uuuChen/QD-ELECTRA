@@ -17,11 +17,12 @@ import checkpoint
 
 class Trainer(object):
     """Training Helper Class"""
-    def __init__(self, train_cfg, model_cfg, model, data_iter, optimizer, save_dir, device):
+    def __init__(self, train_cfg, model_cfg, model, train_data_iter, eval_data_iter, optimizer, save_dir, device):
         self.train_cfg = train_cfg # config for training : see class Config
         self.model_cfg = model_cfg # config for model
         self.model = model
-        self.data_iter = data_iter # iterator to load data
+        self.train_data_iter = train_data_iter # iterator to load data
+        self.eval_data_iter = eval_data_iter # iterator to load data
         self.optimizer = optimizer
         self.save_dir = save_dir
         self.device = device # device name
@@ -37,7 +38,7 @@ class Trainer(object):
         global_step = 0 # global iteration steps regardless of epochs
         for e in range(self.train_cfg.n_epochs):
             loss_sum = 0. # the sum of iteration losses to get average loss in every epoch
-            iter_bar = tqdm(self.data_iter, desc='Iter (loss=X.XXX)')
+            iter_bar = tqdm(self.train_data_iter, desc='Iter (loss=X.XXX)')
             for i, batch in enumerate(iter_bar):
                 batch = [t.to(self.device) for t in batch]
 
@@ -70,7 +71,7 @@ class Trainer(object):
         model = self.model.to(self.device)
         if data_parallel: # use Data Parallelism with Multi-GPU
             model = nn.DataParallel(model)
-        iter_bar = tqdm(self.data_iter, desc='Iter')
+        iter_bar = tqdm(self.eval_data_iter, desc='Iter')
         global_step = 0
         result_values_sum = None
         for batch in iter_bar:

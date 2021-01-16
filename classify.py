@@ -455,7 +455,8 @@ def main(task_name='qqp',
          base_train_cfg='config/QDElectra_pretrain.json',
          train_cfg='config/train_mrpc.json',
          model_cfg='config/QDElectra_base.json',
-         data_file='GLUE/glue_data/QQP/train.tsv',
+         train_data_file='GLUE/glue_data/QQP/train.tsv',
+         eval_data_file='GLUE/glue_data/QQP/eval.tsv',
          model_file=None,
          data_parallel=True,
          vocab='../uncased_L-12_H-768_A-12/vocab.txt',
@@ -481,8 +482,10 @@ def main(task_name='qqp',
         AddSpecialTokensWithTruncation(max_len),
         TokenIndexing(tokenizer.convert_tokens_to_ids, TaskDataset.labels, output_mode, max_len)
     ]
-    data_set = TaskDataset(data_file, pipeline)
-    data_iter = DataLoader(data_set, batch_size=train_cfg.batch_size, shuffle=True)
+    train_data_set = TaskDataset(train_data_file, pipeline)
+    eval_data_set = TaskDataset(eval_data_file, pipeline)
+    train_data_iter = DataLoader(train_data_set, batch_size=train_cfg.batch_size, shuffle=True)
+    eval_data_iter = DataLoader(eval_data_set, batch_size=train_cfg.batch_size, shuffle=False)
 
     generator = ElectraForSequenceClassification.from_pretrained('google/electra-small-generator')
     t_discriminator = ElectraForSequenceClassification.from_pretrained('google/electra-base-discriminator')
@@ -497,7 +500,9 @@ def main(task_name='qqp',
     optimizer = optim.optim4GPU(train_cfg, model)
     writer = SummaryWriter(log_dir=log_dir) # for tensorboardX
 
-    base_trainer_args = (train_cfg, model_cfg, model, data_iter, optimizer, save_dir, get_device())
+    base_trainer_args = (
+        train_cfg, model_cfg, model, train_data_iter, eval_data_iter, optimizer, save_dir, get_device()
+    )
     trainer = QuantizedDistillElectraTrainer(
         task_name, output_mode, pred_distill, imitate_tinybert, len(TaskDataset.labels), writer, *base_trainer_args
     )
