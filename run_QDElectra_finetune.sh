@@ -5,8 +5,8 @@ python classify.py \
         --model_cfg './config/QDElectra_base.json' \
         --data_file './data/msr_paraphrase_train.txt' \
         --vocab './data/vocab.txt' \
-        --save_dir './finetune/mnli/' \
-        --log_dir './finetune/mnli/log_dir/' \
+        --save_dir './finetune/mrpc/' \
+        --log_dir './finetune/mrpc/log_dir/' \
         --pred_distill True \
         --quantize True \
         --imitate_tinybert False
