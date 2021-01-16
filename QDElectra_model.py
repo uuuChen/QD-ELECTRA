@@ -427,8 +427,8 @@ class QuantizedElectraEmbeddings(ElectraEmbeddings):
             config, config.type_vocab_size, config.embedding_size
         )
 
-        self.LayerNorm = QuantizedLayerNorm(config.embedding_size, eps=config.layer_norm_eps)
-        self.dropout = QuantizedDropout(config.hidden_dropout_prob)
+        self.LayerNorm = nn.LayerNorm(config.embedding_size, eps=config.layer_norm_eps)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
 
         self.register_buffer("position_ids", torch.arange(config.max_position_embeddings).expand((1, -1)))
         self.position_embedding_type = getattr(config, "position_embedding_type", "absolute")
@@ -464,6 +464,8 @@ class QuantizedElectraSelfAttention(ElectraSelfAttention):
             self.distance_embedding = quantized_embedding_setup(
                 config, 2 * config.max_position_embeddings - 1, self.attention_head_size
             )
+
+        self.is_decoder = config.is_decoder
 
 
 class QuantizedElectraSelfOutput(ElectraSelfOutput):
@@ -511,10 +513,9 @@ class QuantizedElectraLayer(ElectraLayer):
         super(ElectraLayer, self).__init__()
         self.chunk_size_feed_forward = config.chunk_size_feed_forward
         self.seq_len_dim = 1
-        self.attention = ElectraAttention(config)
+        self.attention = QuantizedElectraAttention(config)
         self.is_decoder = config.is_decoder
         self.add_cross_attention = config.add_cross_attention
-        self.attention = QuantizedElectraAttention(config)
         if self.add_cross_attention:
             assert self.is_decoder, f"{self} should be used as a decoder model if cross attention is added"
             self.crossattention = QuantizedElectraAttention(config)
@@ -561,6 +562,7 @@ class QuantizedElectraForPreTraining(ElectraForPreTraining):
         super(ElectraForPreTraining, self).__init__(config)
         self.electra = QuantizedElectraModel(config)
         self.discriminator_predictions = QuantizedElectraDiscriminatorPredictions(config)
+        self.init_weights()
 
 
 class QuantizedElectraClassificationHead(ElectraClassificationHead):
@@ -581,6 +583,7 @@ class QuantizedElectraForSequenceClassification(ElectraForSequenceClassification
         self.num_labels = config.num_labels
         self.electra = QuantizedElectraModel(config)
         self.classifier = QuantizedElectraClassificationHead(config)
+
         self.init_weights()
 
 
