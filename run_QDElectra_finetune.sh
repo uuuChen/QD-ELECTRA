@@ -3,7 +3,8 @@ python classify.py \
         --task_name 'mrpc' \
         --train_cfg './config/train_mrpc.json' \
         --model_cfg './config/QDElectra_base.json' \
-        --data_file './data/msr_paraphrase_train.txt' \
+        --train_data_file './GLUE/glue_data/QQP/train.tsv' \
+        --eval_data_file './GLUE/glue_data/QQP/eval.tsv' \
         --vocab './data/vocab.txt' \
         --save_dir './finetune/mrpc/' \
         --log_dir './finetune/mrpc/log_dir/' \
