@@ -446,7 +446,7 @@ class QuantizedDistillElectraTrainer(train.Trainer):
             preds = np.squeeze(s_outputs.logits.detach().cpu().numpy())
         else:
             raise KeyError(self.output_mode)
-        result = compute_metrics(self.task_name, preds, label_ids.numpy())
+        result = compute_metrics(self.task_name, preds, label_ids.cpu().numpy())
         result['loss'] = loss
         return result
 
@@ -484,37 +484,15 @@ def main(task_name='qqp',
     data_set = TaskDataset(data_file, pipeline)
     data_iter = DataLoader(data_set, batch_size=train_cfg.batch_size, shuffle=True)
 
-    # generator = ElectraForSequenceClassification.from_pretrained(
-    #     'google/electra-small-generator'
-    # )
-    # t_discriminator = ElectraForSequenceClassification.from_pretrained(
-    #     'google/electra-base-discriminator'
-    # )
-    # s_discriminator = QuantizedElectraForSequenceClassification if quantize else ElectraForSequenceClassification
-    # s_discriminator = s_discriminator.from_pretrained(
-    #     'google/electra-small-discriminator', config=model_cfg
-    # )
-    # model = DistillElectraForSequenceClassification(generator, t_discriminator, s_discriminator, model_cfg)
-    # model.load_state_dict(
-    #     torch.load('./saved_QDElectra/model_steps_40000.pt', map_location=get_device()), strict=False
-    # )
-    # model.t_discriminator.save_pretrained("load_model/teacher/")
-    # model.s_discriminator.save_pretrained("load_model/student/")
-    # raise Exception
-    teacher_config = ElectraConfig().from_json_file("load_model/teacher/config.json")
-    student_config = ElectraConfig().from_json_file("load_model/student/config.json")
-    generator = ElectraForSequenceClassification.from_pretrained(
-        'google/electra-small-generator'
-    )
-    t_discriminator = ElectraForSequenceClassification.from_pretrained(
-        'load_model/teacher/pytorch_model.bin', config=teacher_config
-    )
-    s_discriminator = QuantizedElectraForSequenceClassification if quantize else ElectraForSequenceClassification
-    s_discriminator = s_discriminator.from_pretrained(
-        'load_model/student/pytorch_model.bin', config=student_config
-    )
-
+    generator = ElectraForSequenceClassification.from_pretrained('google/electra-small-generator')
+    t_discriminator = ElectraForSequenceClassification.from_pretrained('google/electra-base-discriminator')
+    if quantize:
+        s_discriminator = QuantizedElectraForSequenceClassification
+    else:
+        s_discriminator = ElectraForSequenceClassification
+    s_discriminator = s_discriminator.from_pretrained('google/electra-small-discriminator', config=model_cfg)
     model = DistillElectraForSequenceClassification(generator, t_discriminator, s_discriminator, model_cfg)
+    model.load_state_dict(torch.load('saved_QDElectra/model_steps_40000.pt', map_location=get_device()), strict=False)
 
     optimizer = optim.optim4GPU(train_cfg, model)
     writer = SummaryWriter(log_dir=log_dir) # for tensorboardX
