@@ -8,6 +8,7 @@ import csv
 import fire
 import json
 import numpy as np
+from tqdm import tqdm
 from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import matthews_corrcoef, f1_score
 
@@ -364,6 +365,56 @@ class QuantizedDistillElectraTrainer(train.Trainer):
         self.mseLoss = nn.MSELoss()
         self.ceLoss = nn.CrossEntropyLoss()
 
+    def train(self, model_file=None, pretrain_file=None, data_parallel=True):
+        """ Train Loop """
+        self.model.train()  # train mode
+        self.load(model_file, pretrain_file)
+        model = self.model.to(self.device)
+        if data_parallel:  # use Data Parallelism with Multi-GPU
+            model = nn.DataParallel(model)
+
+        global_step = 0  # global iteration steps regardless of epochs
+        for e in range(self.train_cfg.n_epochs):
+            loss_sum = 0.  # the sum of iteration losses to get average loss in every epoch
+            local_step = 0
+            result_values_sum = None
+            iter_bar = tqdm(self.train_data_iter, desc='Iter (loss=X.XXX)')
+            for i, batch in enumerate(iter_bar):
+                batch = [t.to(self.device) for t in batch]
+
+                self.optimizer.zero_grad()
+                loss = self.get_loss(model, batch, global_step).mean()  # mean() for Data Parallelism
+                loss.backward()
+                self.optimizer.step()
+
+                global_step += 1
+                local_step += 1
+                loss_sum += loss.item()
+                iter_bar.set_description('Iter (loss=%5.3f)' % loss.item())
+
+                with torch.no_grad():  # evaluation without gradient calculation
+                    result_dict = self.evaluate(model, batch)  # accuracy to print
+                result_values = np.array(list(result_dict.values()))
+                if result_values_sum is None:
+                    result_values_sum = [0] * len(result_values)
+                result_values_sum += result_values
+                print(list(zip(result_dict.keys(), result_values_sum/local_step)))
+
+                if global_step % self.train_cfg.save_steps == 0:  # save
+                    self.save(global_step)
+
+                if self.train_cfg.total_steps and self.train_cfg.total_steps < global_step:
+                    print('Epoch %d/%d : Average Loss %5.3f' % (e + 1, self.train_cfg.n_epochs, loss_sum / (i + 1)))
+                    print('The Total Steps have been reached.')
+                    self.save(global_step)  # save and finish when global_steps reach total_steps
+                    return
+
+            print('Epoch %d/%d : Average Loss %5.3f' % (e + 1, self.train_cfg.n_epochs, loss_sum / (i + 1)))
+        self.save(global_step)
+
+    def eval(self, model_file, data_parallel=True):
+        super().eval(model_file, data_parallel)
+
     def get_loss(self, model, batch, global_step): # make sure loss is tensor
         t_outputs, s_outputs, s2t_hidden_states = model(*batch)
 
@@ -489,13 +540,10 @@ def main(task_name='qqp',
 
     generator = ElectraForSequenceClassification.from_pretrained('google/electra-small-generator')
     t_discriminator = ElectraForSequenceClassification.from_pretrained('google/electra-base-discriminator')
-    if quantize:
-        s_discriminator = QuantizedElectraForSequenceClassification
-    else:
-        s_discriminator = ElectraForSequenceClassification
+    s_discriminator = QuantizedElectraForSequenceClassification if quantize else ElectraForSequenceClassification
     s_discriminator = s_discriminator.from_pretrained('google/electra-small-discriminator', config=model_cfg)
     model = DistillElectraForSequenceClassification(generator, t_discriminator, s_discriminator, model_cfg)
-    model.load_state_dict(torch.load('saved_QDElectra/model_steps_40000.pt', map_location=get_device()), strict=False)
+    # model.load_state_dict(torch.load('saved_QDElectra/model_steps_40000.pt', map_location=get_device()), strict=False)
 
     optimizer = optim.optim4GPU(train_cfg, model)
     writer = SummaryWriter(log_dir=log_dir) # for tensorboardX
