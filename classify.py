@@ -456,7 +456,7 @@ class QuantizedDistillElectraTrainer(train.Trainer):
         #       3-1. Teacher layer numbers equal to student layer numbers
         #       3-2. Teacher head numbers are divisible by Student head numbers
         # -----------------------
-        n_distilled_layers = cur_epoch if self.gradually_distill else self.max_n_distilled_layers
+        n_distilled_layers = ceil(cur_epoch / 1) if self.gradually_distill else self.max_n_distilled_layers
 
         soft_logits_loss = self.bceLoss(
             F.sigmoid(s_outputs.logits / self.train_cfg.temperature),
@@ -479,6 +479,9 @@ class QuantizedDistillElectraTrainer(train.Trainer):
             split_t_attens = torch.split(t_atten.detach(), split_sections, dim=1)
             for i, split_t_atten in enumerate(split_t_attens):
                 atten_layers_loss += self.mseLoss(s_atten[:, i, :, :], torch.mean(split_t_atten, dim=1))
+
+        soft_logits_loss *= self.train_cfg.soft_logits_factor
+        atten_layers_loss *= self.train_cfg.atten_layers_factor
 
         if self.imitate_tinybert:
             if not pred_distill:

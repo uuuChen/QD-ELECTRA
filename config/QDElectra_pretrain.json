@@ -7,5 +7,7 @@
     "save_steps": 10000,
     "total_steps": 1000000,
     "temperature": 1,
-    "lambda_": 50
+    "lambda_": 50,
+    "soft_logits_factor": 100,
+    "atten_layers_factor": 70
 }
