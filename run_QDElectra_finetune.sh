@@ -11,6 +11,6 @@ python classify.py \
         --log_dir './finetune/mrpc/log_dir/' \
         --distill True \
         --quantize True \
-        --gradually_distill True \
+        --gradually_distill Falseg \
         --imitate_tinybert False \
         --pred_distill True
