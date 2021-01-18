@@ -11,6 +11,7 @@ import numpy as np
 from tqdm import tqdm
 from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import matthews_corrcoef, f1_score
+from math import ceil
 
 import torch.nn.functional as F
 import torch
