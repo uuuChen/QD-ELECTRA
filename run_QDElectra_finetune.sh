@@ -9,6 +9,7 @@ python classify.py \
         --vocab './data/vocab.txt' \
         --save_dir './finetune/qqp/' \
         --log_dir './finetune/qqp/log_dir/' \
-        --pred_distill True \
+        --distill True \
         --quantize True \
-        --imitate_tinybert False
+        --imitate_tinybert False \
+        --pred_distill True

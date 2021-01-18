@@ -352,10 +352,21 @@ def get_task_params(task_name):
 
 
 class QuantizedDistillElectraTrainer(train.Trainer):
-    def __init__(self, task_name, output_mode, pred_distill, imitate_tinybert, num_labels, writer, *args, **kwargs):
+    def __init__(self,
+                 task_name,
+                 output_mode,
+                 distill,
+                 imitate_tinybert,
+                 pred_distill,
+                 num_labels,
+                 writer,
+                 *args,
+                 **kwargs):
+
         super().__init__(*args, **kwargs)
         self.task_name = task_name
         self.output_mode = output_mode
+        self.distill = distill
         self.pred_distill = pred_distill
         self.imitate_tinybert = imitate_tinybert
         self.num_labels = num_labels
@@ -422,6 +433,16 @@ class QuantizedDistillElectraTrainer(train.Trainer):
         s_outputs.loss *= self.train_cfg.lambda_
         t_outputs.loss = t_outputs.loss.mean()
         s_outputs.loss = s_outputs.loss.mean()
+
+        if not self.distill:
+            total_loss = s_outputs.loss
+            self.writer.add_scalars(
+                'data/scalar_group', {
+                    'total_loss': total_loss.item(),
+                    'lr': self.optimizer.get_lr()[0]
+                }, global_step
+            )
+            return total_loss
 
         # -----------------------
         # Get distillation loss
@@ -513,9 +534,10 @@ def main(task_name='qqp',
          vocab='../uncased_L-12_H-768_A-12/vocab.txt',
          log_dir='../exp/electra/pretrain/runs',
          save_dir='../exp/bert/mrpc',
-         pred_distill=True,
-         quantize=False,
-         imitate_tinybert=False):
+         distill=True,
+         quantize=True,
+         imitate_tinybert=False,
+         pred_distill=True):
 
     check_dirs_exist([log_dir, save_dir])
 
@@ -553,7 +575,14 @@ def main(task_name='qqp',
         train_cfg, model_cfg, model, train_data_iter, eval_data_iter, optimizer, save_dir, get_device()
     )
     trainer = QuantizedDistillElectraTrainer(
-        task_name, output_mode, pred_distill, imitate_tinybert, len(TaskDataset.labels), writer, *base_trainer_args
+        task_name,
+        output_mode,
+        distill,
+        imitate_tinybert,
+        pred_distill,
+        len(TaskDataset.labels),
+        writer,
+        *base_trainer_args
     )
 
     trainer.train(model_file, None, data_parallel)
