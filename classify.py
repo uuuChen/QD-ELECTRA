@@ -356,6 +356,7 @@ class QuantizedDistillElectraTrainer(train.Trainer):
                  task_name,
                  output_mode,
                  distill,
+                 gradually_distill,
                  imitate_tinybert,
                  pred_distill,
                  num_labels,
@@ -367,10 +368,12 @@ class QuantizedDistillElectraTrainer(train.Trainer):
         self.task_name = task_name
         self.output_mode = output_mode
         self.distill = distill
+        self.gradually_distill = gradually_distill
         self.pred_distill = pred_distill
         self.imitate_tinybert = imitate_tinybert
         self.num_labels = num_labels
         self.writer = writer
+        self.max_n_distilled_layers = self.model_cfg.num_hidden_layers + 1
 
         self.bceLoss = nn.BCELoss()
         self.mseLoss = nn.MSELoss()
@@ -394,7 +397,7 @@ class QuantizedDistillElectraTrainer(train.Trainer):
                 batch = [t.to(self.device) for t in batch]
 
                 self.optimizer.zero_grad()
-                loss = self.get_loss(model, batch, global_step).mean()  # mean() for Data Parallelism
+                loss = self.get_loss(model, batch, global_step, e+1).mean()  # mean() for Data Parallelism
                 loss.backward()
                 self.optimizer.step()
 
@@ -426,7 +429,7 @@ class QuantizedDistillElectraTrainer(train.Trainer):
     def eval(self, model_file, data_parallel=True):
         super().eval(model_file, data_parallel)
 
-    def get_loss(self, model, batch, global_step): # make sure loss is tensor
+    def get_loss(self, model, batch, global_step, cur_epoch): # make sure loss is tensor
         t_outputs, s_outputs, s2t_hidden_states = model(*batch)
 
         t_outputs.loss *= self.train_cfg.lambda_
@@ -453,13 +456,17 @@ class QuantizedDistillElectraTrainer(train.Trainer):
         #       3-1. Teacher layer numbers equal to student layer numbers
         #       3-2. Teacher head numbers are divisible by Student head numbers
         # -----------------------
+        n_distilled_layers = cur_epoch if self.gradually_distill else self.max_n_distilled_layers
+
         soft_logits_loss = self.bceLoss(
             F.sigmoid(s_outputs.logits / self.train_cfg.temperature),
             F.sigmoid(t_outputs.logits.detach() / self.train_cfg.temperature),
         ) * self.train_cfg.temperature * self.train_cfg.temperature
+        if self.gradually_distill and n_distilled_layers <= self.max_n_distilled_layers:
+            soft_logits_loss = torch.zeros(1)
 
         hidden_layers_loss = 0
-        for t_hidden, s_hidden in zip(t_outputs.hidden_states, s2t_hidden_states):
+        for s_hidden, t_hidden in list(zip(s2t_hidden_states, t_outputs.hidden_states, ))[:n_distilled_layers]:
             hidden_layers_loss += self.mseLoss(s_hidden, t_hidden.detach())
 
         # -----------------------
@@ -468,7 +475,7 @@ class QuantizedDistillElectraTrainer(train.Trainer):
         # -----------------------
         atten_layers_loss = 0
         split_sections = [self.model_cfg.s_n_heads] * (self.model_cfg.t_n_heads // self.model_cfg.s_n_heads)
-        for t_atten, s_atten in zip(t_outputs.attentions, s_outputs.attentions):
+        for s_atten, t_atten in list(zip(s_outputs.attentions, t_outputs.attentions))[:n_distilled_layers]:
             split_t_attens = torch.split(t_atten.detach(), split_sections, dim=1)
             for i, split_t_atten in enumerate(split_t_attens):
                 atten_layers_loss += self.mseLoss(s_atten[:, i, :, :], torch.mean(split_t_atten, dim=1))
@@ -536,6 +543,7 @@ def main(task_name='qqp',
          save_dir='../exp/bert/mrpc',
          distill=True,
          quantize=True,
+         gradually_distill=False,
          imitate_tinybert=False,
          pred_distill=True):
 
@@ -578,6 +586,7 @@ def main(task_name='qqp',
         task_name,
         output_mode,
         distill,
+        gradually_distill,
         imitate_tinybert,
         pred_distill,
         len(TaskDataset.labels),
