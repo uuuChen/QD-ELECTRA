@@ -463,7 +463,7 @@ class QuantizedDistillElectraTrainer(train.Trainer):
             F.sigmoid(t_outputs.logits.detach() / self.train_cfg.temperature),
         ) * self.train_cfg.temperature * self.train_cfg.temperature
         if self.gradually_distill and n_distilled_layers <= self.max_n_distilled_layers:
-            soft_logits_loss = torch.zeros(1)
+            soft_logits_loss *= 0
 
         hidden_layers_loss = 0
         for s_hidden, t_hidden in list(zip(s2t_hidden_states, t_outputs.hidden_states, ))[:n_distilled_layers]:
