@@ -104,7 +104,6 @@ class Trainer(object):
 
     def save(self, i):
         """ save current model """
-        os.makedirs(self.save_dir, exist_ok=True)
         torch.save(self.model.state_dict(), os.path.join(self.save_dir, 'model_steps_' + str(i) + '.pt'))
 
     @abstractmethod

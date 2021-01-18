@@ -98,3 +98,15 @@ def get_logger(name, log_path):
     logger.setLevel(logging.DEBUG)
     return logger
 
+
+def check_dirs_exist(path_or_path_list):
+    if isinstance(path_or_path_list, str):
+        os.makedirs(path_or_path_list, exist_ok=True)
+    elif isinstance(path_or_path_list, list):
+        for path in path_or_path_list:
+            os.makedirs(path, exist_ok=True)
+    else:
+        raise AttributeError(path_or_path_list)
+
+
+

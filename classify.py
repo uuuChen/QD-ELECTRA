@@ -36,7 +36,7 @@ import tokenization
 import optim
 import train
 
-from utils import set_seeds, get_device, truncate_tokens_pair
+from utils import set_seeds, get_device, truncate_tokens_pair, check_dirs_exist
 
 
 class CsvDataset(Dataset):
@@ -516,6 +516,8 @@ def main(task_name='qqp',
          pred_distill=True,
          quantize=False,
          imitate_tinybert=False):
+
+    check_dirs_exist([log_dir, save_dir])
 
     train_cfg_dict = json.load(open(base_train_cfg, "r"))
     train_cfg_dict.update(json.load(open(train_cfg, "r")))

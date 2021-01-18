@@ -21,7 +21,7 @@ import tokenization
 import optim
 import train
 
-from utils import set_seeds, get_device, truncate_tokens_pair
+from utils import set_seeds, get_device, truncate_tokens_pair, check_dirs_exist
 
 # Input file format :
 # 1. One sentence per line. These should ideally be actual sentences,
@@ -185,6 +185,8 @@ def main(train_cfg='config/electra_pretrain.json',
          max_len=128,
          max_pred=20,
          mask_prob=0.15):
+
+    check_dirs_exist([log_dir, save_dir])
 
     train_cfg = ElectraConfig().from_json_file(train_cfg)
     model_cfg = ElectraConfig().from_json_file(model_cfg)
