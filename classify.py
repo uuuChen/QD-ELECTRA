@@ -545,7 +545,6 @@ def main(task_name='qqp',
     s_discriminator = QuantizedElectraForSequenceClassification if quantize else ElectraForSequenceClassification
     s_discriminator = s_discriminator.from_pretrained('google/electra-small-discriminator', config=model_cfg)
     model = DistillElectraForSequenceClassification(generator, t_discriminator, s_discriminator, model_cfg)
-    # model.load_state_dict(torch.load('saved_QDElectra/model_steps_40000.pt', map_location=get_device()), strict=False)
 
     optimizer = optim.optim4GPU(train_cfg, model)
     writer = SummaryWriter(log_dir=log_dir) # for tensorboardX

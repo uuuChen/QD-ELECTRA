@@ -90,7 +90,7 @@ class Trainer(object):
         """ load saved model or pretrained transformer (a part of model) """
         if model_file:
             print('Loading the model from', model_file)
-            self.model.load_state_dict(torch.load(model_file))
+            self.model.load_state_dict(torch.load(model_file, map_location=self.device), strict=False)
 
         elif pretrain_file: # use pretrained transformer
             print('Loading the pretrained model from', pretrain_file)
