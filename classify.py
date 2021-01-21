@@ -347,7 +347,9 @@ def get_task_params(task_name):
         "sts-b": {"n_epochs": 20, "max_len": 128},
         "qqp":   {"n_epochs": 5,  "max_len": 128},
         "qnli":  {"n_epochs": 10, "max_len": 128},
-        "rte":   {"n_epochs": 20, "max_len": 128}
+        "rte":   {"n_epochs": 20, "max_len": 128},
+        "wnli":  {"n_epochs": 3,  "max_len": 128},
+
     }
     return output_modes[task_name], default_params[task_name]["n_epochs"], default_params[task_name]["max_len"]
 
