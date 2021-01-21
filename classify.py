@@ -413,7 +413,7 @@ class QuantizedDistillElectraTrainer(train.Trainer):
                 if result_values_sum is None:
                     result_values_sum = [0] * len(result_values)
                 result_values_sum += result_values
-                print(list(zip(result_dict.keys(), result_values_sum/local_step)))
+                print('\t', list(zip(result_dict.keys(), result_values_sum/local_step)))
 
                 if global_step % self.train_cfg.save_steps == 0:  # save
                     self.save(global_step)
@@ -433,8 +433,6 @@ class QuantizedDistillElectraTrainer(train.Trainer):
     def get_loss(self, model, batch, global_step, cur_epoch): # make sure loss is tensor
         t_outputs, s_outputs, s2t_hidden_states = model(*batch)
 
-        t_outputs.loss *= self.train_cfg.lambda_
-        s_outputs.loss *= self.train_cfg.lambda_
         t_outputs.loss = t_outputs.loss.mean()
         s_outputs.loss = s_outputs.loss.mean()
 
@@ -460,8 +458,8 @@ class QuantizedDistillElectraTrainer(train.Trainer):
         n_distilled_layers = ceil(cur_epoch / 1) if self.gradually_distill else self.max_n_distilled_layers
 
         soft_logits_loss = self.bceLoss(
-            F.sigmoid(s_outputs.logits / self.train_cfg.temperature),
-            F.sigmoid(t_outputs.logits.detach() / self.train_cfg.temperature),
+            torch.sigmoid(s_outputs.logits / self.train_cfg.temperature),
+            torch.sigmoid(t_outputs.logits.detach() / self.train_cfg.temperature),
         ) * self.train_cfg.temperature * self.train_cfg.temperature
         if self.gradually_distill and n_distilled_layers <= self.max_n_distilled_layers:
             soft_logits_loss *= 0
@@ -481,6 +479,8 @@ class QuantizedDistillElectraTrainer(train.Trainer):
             for i, split_t_atten in enumerate(split_t_attens):
                 atten_layers_loss += self.mseLoss(s_atten[:, i, :, :], torch.mean(split_t_atten, dim=1))
 
+        t_outputs.loss *= self.train_cfg.lambda_
+        s_outputs.loss *= self.train_cfg.lambda_
         soft_logits_loss *= self.train_cfg.soft_logits_factor
         atten_layers_loss *= self.train_cfg.atten_layers_factor
 

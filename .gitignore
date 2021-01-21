@@ -16,3 +16,4 @@ dstc7.egg-info/*
 test*
 model.txt
 finetune/
+run_pipeline_*.sh
