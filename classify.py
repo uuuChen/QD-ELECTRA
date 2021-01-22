@@ -211,7 +211,7 @@ class Tokenizing(Pipeline):
         self.task_name = task_name
 
     def __call__(self, instance):
-        if self.task_name == ("cola" or "sst-2"):
+        if self.task_name == "cola" or self.task_name == 'sst-2':
             label, text_a = instance
             text_b = []
         else:
